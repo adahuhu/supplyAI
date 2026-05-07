@@ -83,7 +83,7 @@ function App() {
         {/* Main + optional split AI */}
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           <div style={{ flex: 1, overflow: 'auto', minWidth: 0 }} data-screen-label={route.page}>
-            {route.page === 'dashboard' && <Dashboard setRoute={setRoute} openAI={() => setAiOpen(true)}/>}
+            {route.page === 'dashboard' && <Dashboard setRoute={setRoute} openAI={() => setAiOpen(true)} openCreatePO={openCreatePO}/>}
             {route.page === 'list' && <ListPage initialFilter={route.filter || 'all'} setRoute={setRoute} openRules={openRules} openCreatePO={openCreatePO}/>}
             {route.page === 'sku' && <SKUDetail
               skuId={route.skuId || SKUS[0].id}

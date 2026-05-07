@@ -1217,7 +1217,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       <div style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
-        <div style={{ padding: '18px 22px 40px', maxWidth: 1160, minWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ padding: '24px 32px 48px', maxWidth: 1400, minWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Breadcrumb */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-3)' }}>

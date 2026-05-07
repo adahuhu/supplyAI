@@ -208,8 +208,11 @@ function Toast({ msg, kind = 'info' }) {
 }
 
 // ── PriorityBadge ──────────────────────────
-function PriorityBadge({ level, withDot = true, size = 'sm' }) {
-  const labels = { p1: 'P1 紧急', p2: 'P2 重要', p3: 'P3 关注', safe: '安全' };
+// compact=true → 仅展示级别（P1/P2/P3/安全），不带描述词，用于宽度紧张的列
+function PriorityBadge({ level, withDot = true, size = 'sm', compact = false }) {
+  const full = { p1: 'P1 紧急', p2: 'P2 重要', p3: 'P3 关注', safe: '安全' };
+  const short = { p1: 'P1', p2: 'P2', p3: 'P3', safe: '安全' };
+  const labels = compact ? short : full;
   return (
     <span className={'chip ' + level} style={{ fontSize: size === 'sm' ? 11.5 : 12.5, height: size === 'sm' ? 22 : 26 }}>
       {withDot && <span className={'dot ' + level}/>}

@@ -259,9 +259,9 @@ const DASH_STATS = (() => {
   };
 })();
 
-// Today's recommended actions
+// 需关注 — 数据质量 / 规则配置 / 风险变化
+// 注意：纯采购紧急性的提示由 Dashboard hero 承担，这里不再重复
 const TODAY_ACTIONS = [
-  { id: 'a1', kind: 'urgent', title: '紧急采购：3 个 SKU 将在 5 天内断货', count: 3, action: '立即处理' },
   { id: 'a2', kind: 'review', title: '12 个 SKU 触发新风险等级（上次扫描后）', count: 12, action: '查看变化' },
   { id: 'a3', kind: 'rule', title: '4 个高销量 SKU 仍在使用全局规则', count: 4, action: '配置特配' },
   { id: 'a4', kind: 'forecast', title: '7 个 MSKU 的销量预测样本不足', count: 7, action: '检查预测' },

@@ -73,10 +73,10 @@ function ListPage({ initialFilter = 'all', setRoute, openRules, openCreatePO }) 
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 1400, width: '100%', margin: '0 auto' }}>
 
       {/* Header */}
-      <div style={{ padding: '20px 24px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ padding: '24px 32px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
           <div>
             <div className="h1">备货计划</div>
@@ -127,7 +127,7 @@ function ListPage({ initialFilter = 'all', setRoute, openRules, openCreatePO }) 
       {selected.size > 0 &&
       <div className="fade-in" style={{
         display: 'flex', alignItems: 'center', gap: 10,
-        padding: '10px 24px',
+        padding: '10px 32px',
         background: 'var(--accent-soft)',
         borderBottom: '1px solid var(--border)'
       }}>
@@ -255,7 +255,7 @@ function ListPage({ initialFilter = 'all', setRoute, openRules, openCreatePO }) 
       <div style={{
         flex: 'none',
         display: 'flex', alignItems: 'center', gap: 12,
-        padding: '10px 24px',
+        padding: '10px 32px',
         borderTop: '1px solid var(--border)',
         background: 'var(--surface)',
         fontSize: 12, color: 'var(--text-3)'

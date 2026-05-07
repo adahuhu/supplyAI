@@ -253,6 +253,45 @@ Underline-on-active style. Active tab gets a 2px solid `--accent` bottom border,
 
 A 3px-wide, 1em-tall lavender strip placed before page titles. Subtle but unmistakably "this is a Linear-style heading."
 
+### 4.12 Hero summary card
+
+The "今日工作摘要"-style hero is the **single visual anchor** of a workspace page. **At most one per page.** It compresses scattered signals (high-risk count, urgency, scope, monetary impact) into one action-driven statement.
+
+```
+┌────────────────────────────────────────────────────┐
+│ ┃                                                  │
+│ ┃ TODAY'S SUMMARY                                  │
+│ ┃                                                  │
+│ ┃ 12 个 SKU  需要立即下采购                          │ ← 52px num
+│ ┃                                                  │   18px statement
+│ ┃ ● 8 个 7 天内断货 · 5 个店铺 · ¥48,200    [批量生成] │
+│ ┃                                          [查看 →] │
+└────────────────────────────────────────────────────┘
+   3px accent rail
+```
+
+**Spec**:
+
+| Property | Value |
+|----------|-------|
+| Width | Full content width (no grid columns) |
+| Padding | `22px 26px` (more generous than regular cards) |
+| Background | `linear-gradient(135deg, var(--accent-soft) 0%, transparent 55%), var(--surface)` |
+| Left rail | 3px solid `var(--accent)` absolutely positioned |
+| Hero number | 52px, weight 540, letter-spacing -0.028em (`.num-display .tabular`) |
+| Statement | 18px, weight 500, letter-spacing -0.012em |
+| Meta line | 12.5px, color `--text-2`, separator `·` in `--text-4` |
+| Primary CTA | `.btn.primary`, height **36px** (taller than regular 30px) |
+| Secondary | `.btn.ghost.sm` with `--accent-text` color |
+| Section above | `.label` UPPERCASE eyebrow ("今日工作摘要") |
+
+**Rules**:
+
+- Hero is **always** the first content unit after the page title. Above the financial / KPI rows, above any panel grid.
+- The number in the hero must be **actionable** — answer "what should I do today?" not "what is the system state?"
+- Never put two hero cards on one page. If you need a second focal moment, demote it to a regular `.card`.
+- The accent left rail + accent-soft gradient is the only place we use a tinted card background. Keep it scarce so it remains a "hero only" signal.
+
 ---
 
 ## 5. Layout Principles
