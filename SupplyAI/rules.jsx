@@ -1,0 +1,503 @@
+// 规则设置弹窗 — 补货规则 + 销量预测 两 Tab
+// + 采购计划创建确认 modal
+
+function RulesModal({ open, onClose, ctx, showToast }) {
+  const [tab, setTab] = React.useState('replenish');
+  const [scope, setScope] = React.useState(ctx?.batch ? 'batch' : (ctx?.sku ? 'special' : 'global'));
+  const [saving, setSaving] = React.useState(false);
+  const [computing, setComputing] = React.useState(false);
+
+  // Replenish rule state
+  const [safeDays, setSafeDays] = React.useState(14);
+  const [purchaseDuration, setPurchaseDuration] = React.useState(12);
+  const [purchaseDelivery, setPurchaseDelivery] = React.useState(5);
+  const [qcDays, setQcDays] = React.useState(3);
+  const [logistics, setLogistics] = React.useState([
+    { id: 1, mode: '海运', days: 35 },
+    { id: 2, mode: '空运', days: 8 },
+  ]);
+
+  // Forecast rule state
+  const [forecastMode, setForecastMode] = React.useState('dynamic'); // 'fixed' | 'dynamic' | 'default'
+  const [fixedDaily, setFixedDaily] = React.useState('');
+  const [defaultDaily, setDefaultDaily] = React.useState(5);
+  const [weights, setWeights] = React.useState({ d3: 0, d7: 100, d15: 0, d30: 0 });
+  const [excludeDates, setExcludeDates] = React.useState([{ from: '2026-04-15', to: '2026-04-21', reason: 'Prime Day 促销' }]);
+  const [excludeAbnormal, setExcludeAbnormal] = React.useState(true);
+
+  if (!open) return null;
+
+  const purchaseLeadTime = purchaseDuration + purchaseDelivery + qcDays + Math.max(...logistics.map(l => l.days));
+  const totalCoverage = purchaseLeadTime + safeDays;
+
+  const handleSave = () => {
+    setSaving(true);
+    setTimeout(() => {
+      setSaving(false);
+      setComputing(true);
+      setTimeout(() => {
+        setComputing(false);
+        onClose();
+        showToast('规则已保存，已重新计算' + (ctx?.batch ? ` ${ctx.count} 个 MSKU` : ''));
+      }, 1100);
+    }, 800);
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} width={920}>
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Icon name="settings" size={16}/>
+        <div className="h2" style={{ flex: 1 }}>规则设置</div>
+        <button className="btn ghost icon" onClick={onClose}><Icon name="x" size={14}/></button>
+      </div>
+
+      {/* Scope */}
+      <div style={{ padding: '14px 18px', display: 'flex', gap: 16, borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+        <div style={{ flex: 1 }}>
+          <div className="label" style={{ marginBottom: 6 }}>规则类型</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[
+              { v: 'global', l: '全局规则', d: '所有 MSKU+店铺默认' },
+              { v: 'special', l: '单个特配', d: '覆盖单个 MSKU+店铺' },
+              { v: 'batch', l: '批量特配', d: '最多 200 条' },
+            ].map(o => (
+              <button key={o.v} onClick={() => setScope(o.v)} className="btn" style={{
+                borderColor: scope === o.v ? 'var(--accent)' : 'var(--border)',
+                background: scope === o.v ? 'var(--accent-soft)' : 'var(--surface)',
+                color: scope === o.v ? 'var(--accent-text)' : 'var(--text)',
+                flexDirection: 'column', height: 'auto', padding: '8px 12px',
+                alignItems: 'flex-start', gap: 1,
+              }}>
+                <span style={{ fontWeight: 500 }}>{o.l}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{o.d}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="label" style={{ marginBottom: 6 }}>适用范围</div>
+          <div style={{ padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', fontSize: 12.5 }}>
+            {scope === 'global' && '应用于所有未配置特配的 MSKU + 店铺'}
+            {scope === 'special' && (ctx?.sku ? `${ctx.sku.msku} · ${ctx.sku.store}` : '请先在列表选择')}
+            {scope === 'batch' && `已选 ${ctx?.count || 0} 个 MSKU+店铺，本次操作会覆盖已有特配`}
+          </div>
+          {scope === 'batch' && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 6, padding: '6px 8px', background: 'var(--p2-soft)', borderRadius: 4, fontSize: 11.5, color: 'var(--p2-strong)' }}>
+              <Icon name="alert" size={11}/>批量保存会覆盖已存在的特配规则；本期不支持回退到全局
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 18px' }}>
+        {[
+          { v: 'replenish', l: '补货规则' },
+          { v: 'forecast', l: '销量预测' },
+        ].map(t => (
+          <button key={t.v} onClick={() => setTab(t.v)} style={{
+            appearance: 'none', border: 0, background: 'transparent',
+            padding: '12px 16px', fontSize: 13, color: tab === t.v ? 'var(--text)' : 'var(--text-3)',
+            fontWeight: tab === t.v ? 600 : 400,
+            borderBottom: tab === t.v ? '2px solid var(--accent)' : '2px solid transparent',
+            marginBottom: -1, cursor: 'pointer', fontFamily: 'inherit',
+          }}>{t.l}</button>
+        ))}
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, display: 'flex', minHeight: 460, maxHeight: 580 }}>
+        {tab === 'replenish' ? (
+          <ReplenishTab
+            safeDays={safeDays} setSafeDays={setSafeDays}
+            purchaseDuration={purchaseDuration} setPurchaseDuration={setPurchaseDuration}
+            purchaseDelivery={purchaseDelivery} setPurchaseDelivery={setPurchaseDelivery}
+            qcDays={qcDays} setQcDays={setQcDays}
+            logistics={logistics} setLogistics={setLogistics}
+            purchaseLeadTime={purchaseLeadTime}
+            totalCoverage={totalCoverage}
+          />
+        ) : (
+          <ForecastTab
+            mode={forecastMode} setMode={setForecastMode}
+            fixedDaily={fixedDaily} setFixedDaily={setFixedDaily}
+            defaultDaily={defaultDaily} setDefaultDaily={setDefaultDaily}
+            weights={weights} setWeights={setWeights}
+            excludeDates={excludeDates} setExcludeDates={setExcludeDates}
+            excludeAbnormal={excludeAbnormal} setExcludeAbnormal={setExcludeAbnormal}
+            sku={ctx?.sku}
+          />
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
+          {computing ? <span><span className="pulse">●</span> 计算中…</span> : (saving ? '保存中…' : '修改后保存将触发重新计算')}
+        </span>
+        <div style={{ flex: 1 }}/>
+        <button className="btn" onClick={onClose} disabled={saving || computing}>取消</button>
+        <button className="btn primary" onClick={handleSave} disabled={saving || computing}>
+          {saving ? '保存中…' : computing ? '计算中…' : '保存'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function FieldRow({ label, hint, children, suffix }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}>
+      <div style={{ width: 110, flex: 'none', fontSize: 12.5, color: 'var(--text-2)' }}>
+        {label}
+        {hint && <div style={{ fontSize: 10.5, color: 'var(--text-4)', fontWeight: 400 }}>{hint}</div>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+        {children}
+        {suffix && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDuration, purchaseDelivery, setPurchaseDelivery, qcDays, setQcDays, logistics, setLogistics, purchaseLeadTime, totalCoverage }) {
+  return (
+    <>
+      <div style={{ flex: 1, padding: 18, overflow: 'auto' }}>
+        <div className="label" style={{ marginBottom: 8 }}>时长配置</div>
+        <FieldRow label="安全天数" hint="覆盖周期外储备">
+          <input className="txt" type="number" value={safeDays} onChange={e => setSafeDays(+e.target.value)} style={{ width: 100 }}/>
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>天</span>
+        </FieldRow>
+        <FieldRow label="采购时长" hint="下单到出厂">
+          <input className="txt" type="number" value={purchaseDuration} onChange={e => setPurchaseDuration(+e.target.value)} style={{ width: 100 }}/>
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>天</span>
+        </FieldRow>
+        <FieldRow label="采购交期" hint="工厂到本地仓">
+          <input className="txt" type="number" value={purchaseDelivery} onChange={e => setPurchaseDelivery(+e.target.value)} style={{ width: 100 }}/>
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>天</span>
+        </FieldRow>
+        <FieldRow label="质检时长">
+          <input className="txt" type="number" value={qcDays} onChange={e => setQcDays(+e.target.value)} style={{ width: 100 }}/>
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>天</span>
+        </FieldRow>
+
+        <div className="divider" style={{ margin: '14px 0' }}/>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="label">物流方式</div>
+          <button className="btn sm" onClick={() => setLogistics([...logistics, { id: Date.now(), mode: '快船', days: 18 }])}>
+            <Icon name="plus" size={11}/>新增
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {logistics.map((l, i) => (
+            <div key={l.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <select className="sel" value={l.mode} onChange={e => {
+                const next = [...logistics]; next[i].mode = e.target.value; setLogistics(next);
+              }} style={{ flex: 1 }}>
+                {['海运', '空运', '快船', '快递'].filter(m => m === l.mode || !logistics.some(x => x.mode === m)).map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <input className="txt" type="number" value={l.days}
+                onChange={e => { const next = [...logistics]; next[i].days = +e.target.value; setLogistics(next); }}
+                style={{ width: 100 }}/>
+              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>天</span>
+              <button className="btn ghost icon sm" onClick={() => setLogistics(logistics.filter(x => x.id !== l.id))} disabled={logistics.length === 1}>
+                <Icon name="trash" size={13}/>
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Icon name="info" size={11}/>同一规则下运输方式不可重复 · 计算时永远取最长物流时效
+        </div>
+      </div>
+
+      {/* Right summary */}
+      <div style={{ width: 320, flex: 'none', borderLeft: '1px solid var(--border)', background: 'var(--surface-2)', padding: 18, overflow: 'auto' }}>
+        <div className="label" style={{ marginBottom: 10 }}>实时摘要</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SummaryItem k="采购时效" v={purchaseLeadTime + ' 天'}
+            sub={`= 采购 ${purchaseDuration} + 交期 ${purchaseDelivery} + 质检 ${qcDays} + 物流 ${Math.max(...logistics.map(l => l.days))}`}/>
+          <SummaryItem k="总覆盖周期" v={totalCoverage + ' 天'} sub={`= 采购时效 ${purchaseLeadTime} + 安全 ${safeDays}`} highlight/>
+          <SummaryItem k="安全库存公式" v="未来日销 × 安全天数" mono/>
+          <SummaryItem k="库存参与口径" v="FBA 可用 + 在途 + 本地实际 + 本地预计" mono/>
+          <SummaryItem k="断货时间口径" v="仅 FBA 侧（不含本地）" mono/>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SummaryItem({ k, v, sub, highlight, mono }) {
+  return (
+    <div style={{
+      padding: '10px 12px',
+      background: highlight ? 'var(--accent-soft)' : 'var(--surface)',
+      border: '1px solid ' + (highlight ? 'var(--accent-soft-2)' : 'var(--border)'),
+      borderRadius: 'var(--r)',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 2 }}>{k}</div>
+      <div className={mono ? 'mono' : 'tabular'} style={{ fontSize: mono ? 11.5 : 14, fontWeight: 500, color: highlight ? 'var(--accent-text)' : 'var(--text)' }}>{v}</div>
+      {sub && <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>{sub}</div>}
+    </div>
+  );
+}
+
+function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, setDefaultDaily, weights, setWeights, excludeDates, setExcludeDates, excludeAbnormal, setExcludeAbnormal, sku }) {
+  // Compute preview
+  const sample = sku || SKUS[0];
+  const weightSum = weights.d3 + weights.d7 + weights.d15 + weights.d30;
+  const dynamicDaily = weightSum === 0 ? null : Math.round(
+    (sample.last7Denoised * weights.d7 + (sample.last7Denoised * 1.05) * weights.d3 + (sample.last7Denoised * 0.95) * weights.d15 + (sample.last7Denoised * 0.92) * weights.d30) / weightSum
+  );
+  const finalDaily = mode === 'fixed' && fixedDaily
+    ? +fixedDaily
+    : (mode === 'dynamic' && dynamicDaily != null ? dynamicDaily : (mode === 'default' ? defaultDaily : sample.futureDaily));
+  const stockoutDays = Math.round((sample.fbaAvail + sample.fbaInTransit) / Math.max(1, finalDaily));
+
+  return (
+    <>
+      {/* Left preview */}
+      <div style={{ flex: 1, padding: 18, overflow: 'auto', borderRight: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+        <div className="label" style={{ marginBottom: 10 }}>结果预览（实时）</div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+          <PreviewKV k="近 7 天日销（原始）" v={sample.last7Daily}/>
+          <PreviewKV k="近 7 天日销（去噪后）" v={sample.last7Denoised}/>
+          <PreviewKV k="最终未来平均日销" v={finalDaily} highlight/>
+          <PreviewKV k="预计断货时间" v={fmt.dateLong(new Date(Date.now() + stockoutDays * 86400000))}/>
+          <PreviewKV k="建议采购量" v={fmt.num(Math.max(0, (sample.totalCoverage * finalDaily) - sample.totalStock)) + ' 件'} highlight/>
+          <PreviewKV k="样本天数" v="30 / 30 天"/>
+        </div>
+
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 12 }}>
+          <div className="label" style={{ marginBottom: 8 }}>预测趋势图</div>
+          <ChartArea history={sample.histRaw} future={Array.from({ length: 14 }, () => finalDaily)} height={140}/>
+          <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>
+            <span><span style={{ color: 'var(--accent)' }}>━</span> 历史</span>
+            <span><span style={{ color: 'var(--accent)' }}>┄</span> 预测</span>
+          </div>
+        </div>
+
+        <div className="label" style={{ margin: '14px 0 8px' }}>未来汇总</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+          <PreviewKV k="未来 7 天" v={fmt.num(finalDaily * 7)}/>
+          <PreviewKV k="未来 15 天" v={fmt.num(finalDaily * 15)}/>
+          <PreviewKV k="未来 30 天" v={fmt.num(finalDaily * 30)}/>
+        </div>
+      </div>
+
+      {/* Right settings */}
+      <div style={{ width: 380, flex: 'none', padding: 18, overflow: 'auto' }}>
+        <div className="label" style={{ marginBottom: 8 }}>异常处理</div>
+        <FieldRow label="排除异常时间">
+          <button className="btn sm" onClick={() => setExcludeDates([...excludeDates, { from: '', to: '', reason: '' }])}>
+            <Icon name="plus" size={11}/>添加
+          </button>
+        </FieldRow>
+        {excludeDates.map((d, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', background: 'var(--surface-2)', borderRadius: 4, fontSize: 11.5, marginBottom: 4 }}>
+            <Icon name="alert" size={11} color="var(--p2)"/>
+            <span className="mono">{d.from} → {d.to}</span>
+            <span style={{ color: 'var(--text-3)' }}>· {d.reason}</span>
+            <span style={{ flex: 1 }}/>
+            <button className="btn ghost icon sm" onClick={() => setExcludeDates(excludeDates.filter((_, j) => j !== i))}><Icon name="x" size={11}/></button>
+          </div>
+        ))}
+        <FieldRow label="排除异常销量">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+            <input type="checkbox" checked={excludeAbnormal} onChange={e => setExcludeAbnormal(e.target.checked)}/>
+            自动识别（3σ 离群）
+          </label>
+        </FieldRow>
+
+        <div className="divider" style={{ margin: '14px 0' }}/>
+
+        <div className="label" style={{ marginBottom: 8 }}>未来日销策略</div>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+          {[
+            { v: 'fixed', l: '固定日销量' },
+            { v: 'dynamic', l: '动态销量' },
+            { v: 'default', l: '默认日销' },
+          ].map(o => (
+            <button key={o.v} onClick={() => setMode(o.v)} className="btn sm" style={{
+              flex: 1,
+              borderColor: mode === o.v ? 'var(--accent)' : 'var(--border)',
+              background: mode === o.v ? 'var(--accent-soft)' : 'var(--surface)',
+              color: mode === o.v ? 'var(--accent-text)' : 'var(--text)',
+            }}>{o.l}</button>
+          ))}
+        </div>
+
+        {mode === 'fixed' && (
+          <FieldRow label="固定日销量" hint="优先级最高">
+            <input className="txt" type="number" value={fixedDaily} onChange={e => setFixedDaily(e.target.value)} style={{ flex: 1 }} placeholder="留空使用动态"/>
+            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>件 / 天</span>
+          </FieldRow>
+        )}
+
+        {mode === 'dynamic' && (
+          <>
+            <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginBottom: 8 }}>近 N 天权重（合计 {weightSum}%，留空表示不参与）</div>
+            {[
+              { k: 'd3', l: '近 3 天' },
+              { k: 'd7', l: '近 7 天' },
+              { k: 'd15', l: '近 15 天' },
+              { k: 'd30', l: '近 30 天' },
+            ].map(w => (
+              <FieldRow key={w.k} label={w.l}>
+                <input className="txt" type="number" min={0} max={100} value={weights[w.k]} onChange={e => setWeights({ ...weights, [w.k]: +e.target.value || 0 })} style={{ width: 80 }}/>
+                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>%</span>
+                <div style={{ flex: 1, height: 4, background: 'var(--surface-hover)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ width: weights[w.k] + '%', height: '100%', background: 'var(--accent)' }}/>
+                </div>
+              </FieldRow>
+            ))}
+          </>
+        )}
+
+        {mode === 'default' && (
+          <FieldRow label="未来默认日销">
+            <input className="txt" type="number" value={defaultDaily} onChange={e => setDefaultDaily(+e.target.value)} style={{ flex: 1 }}/>
+            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>件 / 天</span>
+          </FieldRow>
+        )}
+
+        <div style={{ display: 'flex', gap: 6, padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 4, marginTop: 12 }}>
+          <Icon name="info" size={12} color="var(--accent)"/>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 }}>
+            优先级：固定日销 &gt; 动态销量 &gt; 默认日销 &gt; 历史去噪 &gt; 历史原始<br/>
+            历史样本不足时显示「数据不足」 · 历史口径不含今天 · 未来口径含今天
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PreviewKV({ k, v, highlight }) {
+  return (
+    <div style={{
+      padding: '8px 10px',
+      background: highlight ? 'var(--accent-soft)' : 'var(--surface)',
+      border: '1px solid ' + (highlight ? 'var(--accent-soft-2)' : 'var(--border)'),
+      borderRadius: 'var(--r)',
+    }}>
+      <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>{k}</div>
+      <div className="tabular" style={{ fontSize: 14, fontWeight: 600, color: highlight ? 'var(--accent-text)' : 'var(--text)' }}>{v}</div>
+    </div>
+  );
+}
+
+// ── 采购计划创建 ────────────────────────────
+function CreatePOModal({ open, onClose, ids, showToast }) {
+  const [step, setStep] = React.useState('confirm'); // confirm | computing | redirect
+  if (!open) return null;
+  const skus = ids.map(id => SKUS.find(s => s.id === id)).filter(Boolean);
+  const totalQty = skus.reduce((s, x) => s + x.suggestQty, 0);
+
+  const exceedsLimit = ids.length > 50;
+  const noneSelected = ids.length === 0;
+  const noPermission = false; // toggle for empty state demo
+
+  const handleGo = () => {
+    setStep('computing');
+    setTimeout(() => {
+      setStep('redirect');
+      setTimeout(() => {
+        onClose();
+        setStep('confirm');
+        showToast(`已预填 ${ids.length} 条至采购计划创建页`);
+      }, 1100);
+    }, 900);
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} width={560}>
+      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Icon name="lightning" size={16} color="var(--accent)"/>
+        <div className="h2" style={{ flex: 1 }}>生成采购计划</div>
+        <button className="btn ghost icon" onClick={onClose}><Icon name="x" size={14}/></button>
+      </div>
+
+      {noneSelected ? (
+        <EmptyState icon="alert" title="请先勾选需要生成采购计划的商品" sub="在列表中勾选后再点击「生成采购计划」"/>
+      ) : exceedsLimit ? (
+        <EmptyState icon="alert" tone="warn" title="最多只能选择 50 条数据" sub={`当前已选 ${ids.length} 条，请取消多余项后再试`}/>
+      ) : noPermission ? (
+        <EmptyState icon="alert" tone="warn" title="暂无采购计划创建权限" sub="请联系管理员开通「采购计划创建」权限"/>
+      ) : step === 'computing' ? (
+        <div style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <div className="pulse" style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--accent-soft-2)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="refresh" size={20}/>
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>正在生成预填数据…</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>计算中 · 预计 1 秒</div>
+        </div>
+      ) : step === 'redirect' ? (
+        <div style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--p3-soft)', color: 'var(--p3-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="check" size={20}/>
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>已就绪，即将跳转</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>正在打开采购计划创建页…</div>
+        </div>
+      ) : (
+        <>
+          <div style={{ padding: 18 }}>
+            <div style={{ display: 'flex', gap: 6, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r)', marginBottom: 12 }}>
+              <Icon name="info" size={13} color="var(--accent)"/>
+              <div style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
+                本系统不直接完成采购闭环，将携带预填数据跳转至 <strong>采购中心 / 采购计划创建</strong> 页。
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <KV k="勾选 SKU" v={ids.length + ' 条'}/>
+              <KV k="建议采购总量" v={fmt.num(totalQty) + ' 件'}/>
+            </div>
+            <div className="label" style={{ marginBottom: 6 }}>预填明细</div>
+            <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r)' }}>
+              <table className="t" style={{ fontSize: 12 }}>
+                <thead><tr><th>SKU</th><th>店铺</th><th>风险</th><th className="num">建议采购</th></tr></thead>
+                <tbody>
+                  {skus.slice(0, 10).map(s => (
+                    <tr key={s.id}>
+                      <td className="mono" style={{ fontSize: 11 }}>{s.msku}</td>
+                      <td>{s.country.flag} {s.store}</td>
+                      <td><PriorityBadge level={s.priority}/></td>
+                      <td className="num tabular" style={{ fontWeight: 500 }}>{fmt.num(s.suggestQty)}</td>
+                    </tr>
+                  ))}
+                  {skus.length > 10 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-3)' }}>… 还有 {skus.length - 10} 条</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn" onClick={onClose}>取消</button>
+            <button className="btn primary" onClick={handleGo}>
+              <Icon name="arrow-right" size={13}/>跳转至采购中心
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function EmptyState({ icon, title, sub, tone = 'info' }) {
+  const c = tone === 'warn' ? 'var(--p2)' : 'var(--accent)';
+  const bg = tone === 'warn' ? 'var(--p2-soft)' : 'var(--accent-soft)';
+  return (
+    <div style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+      <div style={{ width: 40, height: 40, borderRadius: '50%', background: bg, color: c, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name={icon} size={20}/>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 500 }}>{title}</div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-3)', textAlign: 'center', maxWidth: 320 }}>{sub}</div>
+    </div>
+  );
+}
+
+Object.assign(window, { RulesModal, CreatePOModal });

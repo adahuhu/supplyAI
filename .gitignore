@@ -1,0 +1,20 @@
+# macOS / editor noise
+.DS_Store
+*.swp
+*.swo
+
+# Local environment / package output
+node_modules/
+dist/
+build/
+.env
+.env.*
+*.log
+
+# Generated verification artifacts
+SupplyAI/screenshots/
+SupplyAI/uploads/
+
+# Local/generated scratch files
+_skip.txt
+SupplyAI/SupplyAI - Standalone.html
