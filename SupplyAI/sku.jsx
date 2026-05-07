@@ -1045,11 +1045,6 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
             <text x={rsX} y={PAD.t + cH - 7} fontSize="9" fill="var(--p3-strong)" textAnchor="middle" fontWeight="700">建议补货</text>
           </g>
         )}
-        {!isLastYear && (
-          <text x={PAD.l + cW * 0.65} y={PAD.t + 12} fontSize="9" fill="var(--text-4)" textAnchor="middle">
-            点击预测区域修改系数（蓝线）或库存（绿线）
-          </text>
-        )}
       </svg>
 
       {tip && !editor && !drag && (() => {
