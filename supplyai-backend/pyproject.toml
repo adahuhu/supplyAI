@@ -1,0 +1,104 @@
+[project]
+name = "supplyai"
+version = "0.1.0"
+description = "SupplyAI backend service — Python 单服务（API + Calc + AI + 后台任务）"
+requires-python = ">=3.12"
+authors = [
+    { name = "SupplyAI Team" },
+]
+readme = "README.md"
+
+dependencies = [
+    # Web
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    # ORM (SQLite + MySQL 兼容)
+    "sqlalchemy>=2.0",
+    "greenlet>=3",                     # SQLAlchemy async 必需
+    "aiosqlite>=0.20",
+    "alembic>=1.14",
+    # Validation & Settings
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    # Numerical (Calc Engine)
+    "pandas>=2.2",
+    "numpy>=2.0",
+    # Local cache (in-memory)
+    "cachetools>=5.5",
+    # HTTP client
+    "httpx>=0.28",
+    # Logging
+    "structlog>=24",
+    "openpyxl>=3.1.5",
+]
+
+[project.optional-dependencies]
+prod = [
+    "gunicorn>=23",
+    "aiomysql>=0.2",
+    "dashscope>=1.20",
+    "celery>=5.4",
+    "redis>=5.2",
+    "pyjwt>=2.10",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.13",
+    "ruff>=0.7",
+    "factory-boy>=3",
+    "vcrpy>=6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/supplyai"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",        # pycodestyle, pyflakes
+    "I",                  # isort
+    "UP",                 # pyupgrade
+    "B",                  # flake8-bugbear
+    "ASYNC",              # async-related
+    "SIM",                # flake8-simplify
+    "RUF",                # ruff-specific
+]
+ignore = [
+    "E501",               # line too long (formatter handles)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["alembic/versions/", "tests/fixtures/"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+# 默认排除浏览器 E2E(它会改 event loop policy 影响 async 测试)和 slow.
+# 跑浏览器:  uv run pytest -m browser
+# 跑慢测试:  uv run pytest -m slow
+# 全跑:     uv run pytest -m ''
+addopts = "-ra -q -m 'not browser and not slow'"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: 慢测试或需要真实外网 / LLM,默认跳过",
+    "browser: Playwright 浏览器 E2E,默认跳过(与 pytest-asyncio 不兼容)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest-playwright>=0.7.2",
+]

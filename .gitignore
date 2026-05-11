@@ -18,3 +18,22 @@ SupplyAI/uploads/
 # Local/generated scratch files
 _skip.txt
 SupplyAI/SupplyAI - Standalone.html
+SupplyAI/SupplyAI-standalone-src.html
+
+# Python backend artifacts
+supplyai-backend/.venv/
+supplyai-backend/data/
+**/__pycache__/
+*.pyc
+
+# Local datasets / spreadsheets (raw demo data, not code)
+数据.xlsx
+calc_chain.xlsx
+list_fields.xlsx
+
+# IDE / agent caches
+.claude/
+
+# Annotated screenshot attachments (only commit img1-img13)
+doc-imgs/att-*.bin
+doc-imgs/hires-*.png

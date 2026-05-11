@@ -3,7 +3,9 @@
 
 function RulesModal({ open, onClose, ctx, showToast }) {
   const [tab, setTab] = React.useState('replenish');
-  const [scope, setScope] = React.useState(ctx?.batch ? 'batch' : (ctx?.sku ? 'special' : 'global'));
+  // 规则类型只保留 global / batch。从单个 SKU 进入时,沿用 batch 写入逻辑,
+  // 在适用范围里直接显示当前 MSKU+店铺,不再单列"单个特配" tab。
+  const [scope, setScope] = React.useState(ctx?.batch || ctx?.sku ? 'batch' : 'global');
   const [saving, setSaving] = React.useState(false);
   const [computing, setComputing] = React.useState(false);
 
@@ -30,24 +32,77 @@ function RulesModal({ open, onClose, ctx, showToast }) {
   const purchaseLeadTime = purchaseDuration + purchaseDelivery + qcDays + Math.max(...logistics.map(l => l.days));
   const totalCoverage = purchaseLeadTime + safeDays;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => {
+    try {
+      const targetSku = ctx?.sku;
+      const scopeType = scope === 'global' ? 'global' : 'sku';
+      const baseScope = {
+        scope_type: scopeType,
+        mall_id: scopeType === 'global' ? null : (targetSku?.mall_id ?? null),
+        msku: scopeType === 'global' ? null : (targetSku?.msku ?? null),
+      };
+      // 1. 补货规则(始终上传)
+      if (window.api) {
+        await window.api.rulesUpsert({
+          ...baseScope,
+          safety_days: safeDays,
+          purchase_duration_days: purchaseDuration,
+          delivery_days: purchaseDelivery,
+          qc_days: qcDays,
+          enabled: true,
+          updated_by: 'frontend',
+        });
+      }
+      // 2. 销量预测规则(forecast tab 配置)
+      if (window.api && window.api.forecastRulesUpsert) {
+        await window.api.forecastRulesUpsert({
+          ...baseScope,
+          forecast_mode: forecastMode,
+          fixed_daily_sales: forecastMode === 'fixed' && fixedDaily ? +fixedDaily : null,
+          default_daily_sales: forecastMode === 'default' ? +defaultDaily : null,
+          weight_3d: weights.d3,
+          weight_7d: weights.d7,
+          weight_15d: weights.d15,
+          weight_30d: weights.d30,
+          denoise_enabled: excludeAbnormal,
+          abnormal_dates_json: excludeDates.length ? excludeDates : null,
+          updated_by: 'frontend',
+        });
+      }
       setSaving(false);
       setComputing(true);
-      setTimeout(() => {
-        setComputing(false);
-        onClose();
-        showToast('规则已保存，已重新计算' + (ctx?.batch ? ` ${ctx.count} 个 MSKU` : ''));
-      }, 1100);
-    }, 800);
+      if (window.api && window.api.calcRun) {
+        try { await window.api.calcRun(); } catch (_) { /* 忽略 */ }
+      }
+      setComputing(false);
+      onClose();
+      showToast('规则已保存,已重新计算' + (ctx?.batch ? ` ${ctx.count} 个 MSKU` : ''));
+    } catch (err) {
+      setSaving(false);
+      setComputing(false);
+      showToast('保存失败:' + err.message);
+    }
   };
 
   return (
     <Modal open={open} onClose={onClose} width={920}>
       <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <Icon name="settings" size={16}/>
-        <div className="h2" style={{ flex: 1 }}>规则设置</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="h2">规则设置</div>
+          {ctx?.sku && (
+            <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>
+              {ctx.sku.msku}{ctx.sku.store ? ` · ${ctx.sku.store}` : ''}
+              {ctx.sku.country?.flag ? ` ${ctx.sku.country.flag}` : ''}
+            </div>
+          )}
+          {ctx?.batch && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>
+              批量编辑 · 共 {ctx.count || 0} 个 MSKU+店铺
+            </div>
+          )}
+        </div>
         <button className="btn ghost icon" onClick={onClose}><Icon name="x" size={14}/></button>
       </div>
 
@@ -57,29 +112,44 @@ function RulesModal({ open, onClose, ctx, showToast }) {
           <div className="label" style={{ marginBottom: 6 }}>规则类型</div>
           <div style={{ display: 'flex', gap: 6 }}>
             {[
-              { v: 'global', l: '全局规则', d: '所有 MSKU+店铺默认' },
-              { v: 'special', l: '单个特配', d: '覆盖单个 MSKU+店铺' },
-              { v: 'batch', l: '批量特配', d: '最多 200 条' },
-            ].map(o => (
-              <button key={o.v} onClick={() => setScope(o.v)} className="btn" style={{
-                borderColor: scope === o.v ? 'var(--accent)' : 'var(--border)',
-                background: scope === o.v ? 'var(--accent-soft)' : 'var(--surface)',
-                color: scope === o.v ? 'var(--accent-text)' : 'var(--text)',
-                flexDirection: 'column', height: 'auto', padding: '8px 12px',
-                alignItems: 'flex-start', gap: 1,
-              }}>
-                <span style={{ fontWeight: 500 }}>{o.l}</span>
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{o.d}</span>
-              </button>
-            ))}
+              { v: 'global', l: '全局规则', d: '所有 MSKU+店铺默认', enabled: true },
+              { v: 'batch',  l: '批量特配', d: '覆盖选中 MSKU+店铺', enabled: !!(ctx?.batch || ctx?.sku), why: '需先从 SKU 行或列表勾选进入' },
+            ].map(o => {
+              const disabled = !o.enabled;
+              return (
+                <button
+                  key={o.v}
+                  onClick={() => { if (!disabled) setScope(o.v); }}
+                  disabled={disabled}
+                  title={disabled ? o.why : ''}
+                  className="btn"
+                  style={{
+                    borderColor: scope === o.v ? 'var(--accent)' : 'var(--border)',
+                    background: scope === o.v ? 'var(--accent-soft)' : 'var(--surface)',
+                    color: scope === o.v ? 'var(--accent-text)' : 'var(--text)',
+                    flexDirection: 'column', height: 'auto', padding: '8px 12px',
+                    alignItems: 'flex-start', gap: 1,
+                    opacity: disabled ? 0.45 : 1,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                  }}>
+                  <span style={{ fontWeight: 500 }}>{o.l}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{o.d}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
         <div style={{ flex: 1 }}>
           <div className="label" style={{ marginBottom: 6 }}>适用范围</div>
           <div style={{ padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', fontSize: 12.5 }}>
             {scope === 'global' && '应用于所有未配置特配的 MSKU + 店铺'}
-            {scope === 'special' && (ctx?.sku ? `${ctx.sku.msku} · ${ctx.sku.store}` : '请先在列表选择')}
-            {scope === 'batch' && `已选 ${ctx?.count || 0} 个 MSKU+店铺，本次操作会覆盖已有特配`}
+            {scope === 'batch' && (
+              ctx?.batch
+                ? `已选 ${ctx?.count || 0} 个 MSKU+店铺，本次操作会覆盖已有特配`
+                : ctx?.sku
+                  ? `${ctx.sku.msku} · ${ctx.sku.store}${ctx.sku.country?.flag ? ' ' + ctx.sku.country.flag : ''}`
+                  : '请先从 SKU 行或列表勾选进入'
+            )}
           </div>
           {scope === 'batch' && (
             <div style={{ display: 'flex', gap: 6, marginTop: 6, padding: '6px 8px', background: 'var(--p2-soft)', borderRadius: 4, fontSize: 11.5, color: 'var(--p2-strong)' }}>
@@ -246,10 +316,11 @@ function SummaryItem({ k, v, sub, highlight, mono }) {
 
 function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, setDefaultDaily, weights, setWeights, excludeDates, setExcludeDates, excludeAbnormal, setExcludeAbnormal, sku }) {
   // Compute preview
-  const sample = sku || SKUS[0];
+  const sample = sku || SKUS[0] || { last7Denoised: 0, futureDaily: 0, msku: '—' };
+  const last7 = sample.last7Denoised || 0;
   const weightSum = weights.d3 + weights.d7 + weights.d15 + weights.d30;
   const dynamicDaily = weightSum === 0 ? null : Math.round(
-    (sample.last7Denoised * weights.d7 + (sample.last7Denoised * 1.05) * weights.d3 + (sample.last7Denoised * 0.95) * weights.d15 + (sample.last7Denoised * 0.92) * weights.d30) / weightSum
+    (last7 * weights.d7 + (last7 * 1.05) * weights.d3 + (last7 * 0.95) * weights.d15 + (last7 * 0.92) * weights.d30) / weightSum
   );
   const finalDaily = mode === 'fixed' && fixedDaily
     ? +fixedDaily
@@ -391,26 +462,55 @@ function PreviewKV({ k, v, highlight }) {
 }
 
 // ── 采购计划创建 ────────────────────────────
-function CreatePOModal({ open, onClose, ids, showToast }) {
+function CreatePOModal({ open, onClose, ids, showToast, setRoute }) {
   const [step, setStep] = React.useState('confirm'); // confirm | computing | redirect
   if (!open) return null;
   const skus = ids.map(id => SKUS.find(s => s.id === id)).filter(Boolean);
-  const totalQty = skus.reduce((s, x) => s + x.suggestQty, 0);
+  // 过滤掉 suggest_qty <= 0 的 — 后端会拒;前端先剔除并提示
+  const valid = skus.filter(s => (s.suggestQty || 0) > 0);
+  const skipped = skus.length - valid.length;
+  const totalQty = valid.reduce((s, x) => s + x.suggestQty, 0);
 
   const exceedsLimit = ids.length > 50;
   const noneSelected = ids.length === 0;
+  const allSkipped = skus.length > 0 && valid.length === 0;
   const noPermission = false; // toggle for empty state demo
 
-  const handleGo = () => {
+  const handleGo = async () => {
     setStep('computing');
-    setTimeout(() => {
+    try {
+      const items = valid.map(s => ({
+        mall_id: s.mall_id ?? null,
+        msku: s.msku,
+        sku: s.sku,
+        suggest_qty: s.suggestQty,
+      }));
+      const calcRunId = valid[0]?.calcRunId || null;
+      let createdCount = valid.length;
+      let newDraftId = null;
+      if (window.api && items.length) {
+        const resp = await window.api.purchaseDraftCreate(items, {
+          calc_run_id: calcRunId,
+          created_by: 'frontend',
+        });
+        createdCount = resp.created_count || valid.length;
+        newDraftId = (resp.draft_ids && resp.draft_ids[0]) || null;
+      }
       setStep('redirect');
       setTimeout(() => {
         onClose();
         setStep('confirm');
-        showToast(`已预填 ${ids.length} 条至采购计划创建页`);
-      }, 1100);
-    }, 900);
+        const msg = skipped > 0
+          ? `已生成 ${createdCount} 条草稿,跳过 ${skipped} 个无建议采购量的 SKU`
+          : `已生成 ${createdCount} 条采购草稿`;
+        showToast(msg);
+        // 真跳转 — 进入采购草稿页,带 draftId 高亮
+        if (setRoute) setRoute({ page: 'drafts', draftId: newDraftId });
+      }, 700);
+    } catch (err) {
+      setStep('confirm');
+      showToast('生成失败:' + err.message);
+    }
   };
 
   return (
@@ -425,6 +525,8 @@ function CreatePOModal({ open, onClose, ids, showToast }) {
         <EmptyState icon="alert" title="请先勾选需要生成采购计划的商品" sub="在列表中勾选后再点击「生成采购计划」"/>
       ) : exceedsLimit ? (
         <EmptyState icon="alert" tone="warn" title="最多只能选择 50 条数据" sub={`当前已选 ${ids.length} 条，请取消多余项后再试`}/>
+      ) : allSkipped ? (
+        <EmptyState icon="alert" tone="warn" title="所选 SKU 均无建议采购量" sub="只有标记为「建议采购」的 SKU 可生成草稿,请重新筛选"/>
       ) : noPermission ? (
         <EmptyState icon="alert" tone="warn" title="暂无采购计划创建权限" sub="请联系管理员开通「采购计划创建」权限"/>
       ) : step === 'computing' ? (
@@ -446,38 +548,39 @@ function CreatePOModal({ open, onClose, ids, showToast }) {
       ) : (
         <>
           <div style={{ padding: 18 }}>
-            <div style={{ display: 'flex', gap: 6, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r)', marginBottom: 12 }}>
-              <Icon name="info" size={13} color="var(--accent)"/>
-              <div style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
-                本系统不直接完成采购闭环，将携带预填数据跳转至 <strong>采购中心 / 采购计划创建</strong> 页。
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
               <KV k="勾选 SKU" v={ids.length + ' 条'}/>
+              <KV k="可生成草稿" v={valid.length + ' 条'}/>
               <KV k="建议采购总量" v={fmt.num(totalQty) + ' 件'}/>
             </div>
+            {skipped > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--p2-soft)', color: 'var(--p2-strong)', borderRadius: 'var(--r)', fontSize: 12, marginBottom: 12 }}>
+                <Icon name="alert" size={12}/>
+                <span>勾选中有 {skipped} 个 SKU 无建议采购量,生成时会自动跳过</span>
+              </div>
+            )}
             <div className="label" style={{ marginBottom: 6 }}>预填明细</div>
             <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r)' }}>
               <table className="t" style={{ fontSize: 12 }}>
                 <thead><tr><th>SKU</th><th>店铺</th><th>风险</th><th className="num">建议采购</th></tr></thead>
                 <tbody>
-                  {skus.slice(0, 10).map(s => (
+                  {valid.slice(0, 10).map(s => (
                     <tr key={s.id}>
                       <td className="mono" style={{ fontSize: 11 }}>{s.msku}</td>
-                      <td>{s.country.flag} {s.store}</td>
+                      <td>{(s.country && s.country.flag) || ''} {s.store}</td>
                       <td><PriorityBadge level={s.priority}/></td>
                       <td className="num tabular" style={{ fontWeight: 500 }}>{fmt.num(s.suggestQty)}</td>
                     </tr>
                   ))}
-                  {skus.length > 10 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-3)' }}>… 还有 {skus.length - 10} 条</td></tr>}
+                  {valid.length > 10 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-3)' }}>… 还有 {valid.length - 10} 条</td></tr>}
                 </tbody>
               </table>
             </div>
           </div>
           <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose}>取消</button>
-            <button className="btn primary" onClick={handleGo}>
-              <Icon name="arrow-right" size={13}/>跳转至采购中心
+            <button className="btn primary" onClick={handleGo} disabled={valid.length === 0}>
+              <Icon name="arrow-right" size={13}/>生成 {valid.length} 条草稿,跳转
             </button>
           </div>
         </>

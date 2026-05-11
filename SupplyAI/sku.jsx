@@ -526,19 +526,11 @@ function TooltipMetric({ color, label, value, unit, strongColor }) {
 // ── V7 trend panel: sales + inventory + holiday bands ───────────────────────
 const TODAY_V7 = new Date('2026-05-04T00:00:00');
 
-const HOLIDAYS_V7 = [
-  { id: 'valentines', name: "Valentine's Day", flag: '💝', peak: '2026-02-14', sb: 7, sa: 2, color: '#ec4899', dm: 1.5 },
-  { id: 'mothers', name: "Mother's Day", flag: '🌸', peak: '2026-05-11', sb: 6, sa: 2, color: '#f472b6', dm: 1.5 },
-  { id: 'memorial', name: 'Memorial Day', flag: '🇺🇸', peak: '2026-05-25', sb: 3, sa: 1, color: '#3b82f6', dm: 1.2 },
-  { id: 'fathers', name: "Father's Day", flag: '👔', peak: '2026-06-21', sb: 7, sa: 2, color: '#7c3aed', dm: 1.4 },
-  { id: 'july4', name: 'Independence', flag: '🎆', peak: '2026-07-04', sb: 4, sa: 2, color: '#dc2626', dm: 1.3 },
-  { id: 'primeday', name: 'Prime Day', flag: '⚡', peak: '2026-07-14', sb: 4, sa: 2, color: '#f59e0b', dm: 2.8 },
-  { id: 'backschool', name: 'Back to School', flag: '🎒', peak: '2026-08-25', sb: 10, sa: 5, color: '#06b6d4', dm: 1.3 },
-  { id: 'halloween', name: 'Halloween', flag: '🎃', peak: '2026-10-31', sb: 12, sa: 3, color: '#f97316', dm: 1.5 },
-  { id: 'bfriday', name: 'Black Friday', flag: '🛍️', peak: '2026-11-27', sb: 7, sa: 4, color: '#18181b', dm: 2.2 },
-  { id: 'cybermon', name: 'Cyber Monday', flag: '💻', peak: '2026-11-30', sb: 2, sa: 2, color: '#2563eb', dm: 2.0 },
-  { id: 'christmas', name: 'Christmas', flag: '🎄', peak: '2026-12-25', sb: 14, sa: 4, color: '#dc2626', dm: 2.5 },
-];
+// 节日数据完全来自后端 /dashboard/holidays(挂在 window.HOLIDAYS_DATA),
+// 不再硬编码。adapter 输出已经是 { id, name, flag, peak, sb, sa, dm, color } 格式。
+function getHolidays() {
+  return window.HOLIDAYS_DATA || [];
+}
 
 const TIME_RANGES_V7 = [
   { id: '7d', label: '7天', histDays: 7, futDays: 14 },
@@ -614,7 +606,7 @@ function buildInventoryV7(startInv, forecastValues, invOverrides) {
 function TrendPanelV7({ sku }) {
   const [rangeId, setRangeId] = React.useState('30d');
   const [holidays, setHolidays] = React.useState(() =>
-    HOLIDAYS_V7.map(h => ({ ...h, ...holidayAbsRangeV7(h), mult: h.dm }))
+    getHolidays().map(h => ({ ...h, ...holidayAbsRangeV7(h), mult: h.dm }))
   );
   const [invOverrides, setInvOverrides] = React.useState({});
   const range = TIME_RANGES_V7.find(r => r.id === rangeId) || TIME_RANGES_V7[1];
@@ -631,11 +623,40 @@ function TrendPanelV7({ sku }) {
   const visH = holidays.filter(h => !h.isPointOverride && h.toAbs > 0 && h.fromAbs < range.futDays && Math.abs(h.mult - 1) > 0.01);
   const pointOvr = holidays.filter(h => h.isPointOverride);
 
+  // 节日变更后 debounce 700ms 把当条 upsert 到后端,避免拖动每帧都打。
+  const upsertTimers = React.useRef({});
+  const scheduleUpsert = React.useCallback((merged) => {
+    if (!window.api || !window.api.holidayUpsert) return;
+    if (merged.isPointOverride) return;  // 单点系数覆盖,前端临时态,不持久化
+    const id = merged.id;
+    if (upsertTimers.current[id]) clearTimeout(upsertTimers.current[id]);
+    upsertTimers.current[id] = setTimeout(() => {
+      window.api.holidayUpsert({
+        holiday_id: id,
+        name: merged.name,
+        peak_date: merged.peak,
+        days_before: merged.sb,
+        days_after: merged.sa,
+        sales_multiplier: merged.mult ?? merged.dm ?? 1,
+        color: merged.color || null,
+        flag: merged.flag || null,
+        country_code: merged.country_code || null,
+        enabled: true,
+      }).catch(err => console.warn('[holidayUpsert]', err.message));
+    }, 700);
+  }, []);
+
   const updateHoliday = (id, patch) => {
     setHolidays(prev => {
       const existing = prev.find(h => h.id === id);
-      if (!existing) return [...prev, patch];
-      return prev.map(h => h.id === id ? { ...h, ...patch } : h);
+      if (!existing) {
+        const merged = { ...patch, id };
+        scheduleUpsert(merged);
+        return [...prev, merged];
+      }
+      const merged = { ...existing, ...patch };
+      scheduleUpsert(merged);
+      return prev.map(h => h.id === id ? merged : h);
     });
   };
 
@@ -663,7 +684,7 @@ function TrendPanelV7({ sku }) {
             className="btn sm ghost"
             style={{ fontSize: 11, color: 'var(--text-3)' }}
             onClick={() => {
-              setHolidays(HOLIDAYS_V7.map(h => ({ ...h, ...holidayAbsRangeV7(h), mult: h.dm })));
+              setHolidays(getHolidays().map(h => ({ ...h, ...holidayAbsRangeV7(h), mult: h.dm })));
               setInvOverrides({});
             }}
           >
@@ -1032,9 +1053,10 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
         )}
         {soX && (
           <g>
-            <line x1={soX} y1={PAD.t} x2={soX} y2={PAD.t + cH} stroke="var(--p1)" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.85"/>
-            <rect x={soX - 22} y={PAD.t + 2} width={44} height={14} rx="3" fill="var(--p1)" opacity="0.12"/>
-            <text x={soX} y={PAD.t + 12} fontSize="9" fill="var(--p1)" textAnchor="middle" fontWeight="700">预计断货</text>
+            {/* 把"预计断货"标签放到图表上方（和"今日"同一行），避免与节日色带顶部标签压叠 */}
+            <line x1={soX} y1={PAD.t - 8} x2={soX} y2={PAD.t + cH} stroke="var(--p1)" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.85"/>
+            <rect x={soX - 22} y={PAD.t - 21} width={44} height={14} rx="3" fill="var(--p1-soft)" stroke="var(--p1)" strokeWidth="0.5" strokeOpacity="0.5"/>
+            <text x={soX} y={PAD.t - 10} fontSize="9" fill="var(--p1-strong)" textAnchor="middle" fontWeight="700">预计断货</text>
             <circle cx={soX} cy={PAD.t + cH} r="4" fill="var(--p1)"/>
           </g>
         )}
@@ -1206,13 +1228,38 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
 }
 
 function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, aiMode }) {
-  const sku = SKUS.find(s => s.id === skuId) || SKUS[0];
+  const baseSku = SKUS.find(s => s.id === skuId) || SKUS[0];
+  const [enriched, setEnriched] = React.useState(null);
+  const [loadingDetail, setLoadingDetail] = React.useState(false);
+
+  // 详情页挂载后拉 /skus/detail + /skus/trends 把历史/预测序列合并进 sku
+  React.useEffect(() => {
+    if (!baseSku || !window.api || !baseSku.listingId) return;
+    let cancelled = false;
+    setLoadingDetail(true);
+    Promise.all([
+      window.api.skuDetail(baseSku.listingId).catch(() => null),
+      window.api.skuTrends(baseSku.listingId).catch(() => null),
+    ]).then(([detailResp, trendsResp]) => {
+      if (cancelled) return;
+      if (trendsResp) {
+        setEnriched(window.adapter.mergeTrendsIntoSku(baseSku, trendsResp, detailResp));
+      }
+      setLoadingDetail(false);
+    });
+    return () => { cancelled = true; };
+  }, [skuId, baseSku && baseSku.listingId]);
+
+  const sku = enriched || baseSku;
   const tab = 'overview';
+  if (!sku) {
+    return <div style={{ padding: 32, color: 'var(--text-3)' }}>加载中…</div>;
+  }
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       <div style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
-        <div style={{ padding: '24px 32px 48px', maxWidth: 1400, minWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ padding: '24px 32px 48px', maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
           {/* Breadcrumb */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-3)' }}>
@@ -1288,6 +1335,22 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
               <KV k="采购时效" v={sku.purchaseLeadTime + ' 天'}/>
               <KV k="安全天数" v={sku.safeDays + ' 天'}/>
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <KV
+                k="上次发货"
+                v={sku.lastShipmentAt ? fmt.dateLong(sku.lastShipmentAt) : '—'}
+                hint={sku.lastShipmentAt ? fmt.rel(sku.lastShipmentAt) + ' · rl_fba_shipment_item' : '暂无 FBA 发货记录'}/>
+              <KV
+                k="上次采购"
+                v={sku.lastPurchaseAt ? fmt.dateLong(sku.lastPurchaseAt) : '—'}
+                hint={sku.lastPurchaseAt ? fmt.rel(sku.lastPurchaseAt) + ' · 来自采购草稿' : '暂无采购记录'}/>
+              <KV
+                k="预计到货"
+                v={sku.estimatedArrivalAt ? fmt.dateLong(sku.estimatedArrivalAt) : '—'}
+                hint={sku.estimatedArrivalAt
+                  ? fmt.rel(sku.estimatedArrivalAt) + ' · 取最早一笔在途'
+                  : '暂无在途货件'}/>
+            </div>
           </Panel>
 
           {/* Trend chart */}
@@ -1310,7 +1373,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
               <InvItem color="var(--accent)" label="FBA 可用" value={sku.fbaAvail} note="平台立即可发货"/>
-              <InvItem color="oklch(0.78 0.12 240)" label="FBA 在途" value={sku.fbaInTransit} note="入库中 / 转运中"/>
+              <InvItem color="oklch(0.78 0.12 240)" label="FBA 在途" value={sku.fbaInTransit} note="入库中 / 转运中" expandable inboundList={sku.inboundList}/>
               <InvItem color="var(--p3)" label="本地实际" value={sku.localActual} note="本地仓现货"/>
               <InvItem color="oklch(0.85 0.05 160)" label="本地预计" value={sku.localPlan} note="待入库 / 计划入库"/>
             </div>
@@ -1433,15 +1496,79 @@ function DetailStat({ label, main, sub, hint, last }) {
   );
 }
 
-function InvItem({ color, label, value, note }) {
+const LOGISTICS_LABEL = {
+  sea: '海派', sea_express: '快船', sea_air_express: '空派',
+  purchase: '采购', transfer: '调拨', processing: '加工', local_receiving: '本地入库',
+  air: '空运',
+};
+
+const INBOUND_STATUS_LABEL = {
+  in_transit: '在途', receiving: '入库中', pending: '待发',
+};
+
+function InvItem({ color, label, value, note, expandable, inboundList }) {
+  const [open, setOpen] = React.useState(false);
+  const hasList = expandable && inboundList && inboundList.length > 0;
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div ref={ref} style={{ display: 'flex', flexDirection: 'column', gap: 4, position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-3)' }}>
         <span style={{ width: 8, height: 8, borderRadius: 2, background: color }}/>
         {label}
+        {hasList && (
+          <span
+            onClick={() => setOpen(v => !v)}
+            style={{
+              marginLeft: 'auto', cursor: 'pointer',
+              fontSize: 10.5, color: 'var(--accent-text)',
+              padding: '1px 5px', borderRadius: 4,
+              background: open ? 'var(--accent-soft)' : 'transparent',
+            }}>
+            {inboundList.length} 笔 {open ? '收起 ▴' : '展开 ▾'}
+          </span>
+        )}
       </div>
       <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>{fmt.num(value)}</div>
       <div style={{ fontSize: 11, color: 'var(--text-4)' }}>{note}</div>
+      {hasList && open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+          minWidth: 280, zIndex: 50,
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 'var(--r-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+          padding: 8, fontSize: 11.5,
+        }}>
+          <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginBottom: 6, padding: '0 4px' }}>
+            货件 / 物流方式 / 预计到货
+          </div>
+          {inboundList.map(b => {
+            const mode = LOGISTICS_LABEL[b.inbound_type] || b.inbound_type || '—';
+            const status = INBOUND_STATUS_LABEL[b.inbound_status] || b.inbound_status || '';
+            const eta = b.expected_arrival_date
+              ? new Date(b.expected_arrival_date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+              : '—';
+            return (
+              <div key={b.inbound_id} style={{
+                display: 'grid', gridTemplateColumns: '90px 1fr auto auto',
+                gap: 8, padding: '6px 4px', alignItems: 'center',
+                borderBottom: '1px solid var(--border-subtle, rgba(255,255,255,0.04))',
+              }}>
+                <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.source_order_no || b.inbound_id}</span>
+                <span style={{ color: 'var(--text-2)' }}>{mode}{status ? ` · ${status}` : ''}</span>
+                <span className="tabular" style={{ color: 'var(--text-2)' }}>{fmt.num(b.qty)} 件</span>
+                <span style={{ fontSize: 11, color: 'var(--accent-text)' }}>{eta}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -300,7 +300,30 @@ The "今日工作摘要"-style hero is the **single visual anchor** of a workspa
 
 - **Sidebar (left)**: 220px expanded / 56px collapsed. Border-right hairline. Background is a vertical gradient `--surface-2 → --bg-sunken`. Sections separated by an UPPERCASE `.label`.
 - **Topbar**: 52px. Sits above content area. Search left-of-center, status + AI button right.
-- **Content area**: `padding: 18px 22px 40px`. Max-width 1480px, min-width 980px (data-dense — don't go narrower than this on desktop).
+- **Content area**: see §5.1.1 page chrome — same numbers across all routes.
+
+### 5.1.1 Page chrome (uniform across all routes)
+
+Every full-page route MUST use the same outer container so users don't see content shift left/right when switching pages.
+
+```css
+/* Page chrome — locked spec, do not deviate */
+padding:    24px 32px 48px;   /* top / sides / bottom */
+max-width:  1400px;
+min-width:  980px;            /* dashboards/lists; SKU detail may use 900 */
+margin:     0 auto;           /* horizontal center */
+```
+
+| Route | maxWidth | minWidth | padding | Notes |
+|-------|----------|----------|---------|-------|
+| `/dashboard` (工作台) | 1400 | 980 | `24px 32px 48px` | Standard chrome |
+| `/list` (备货计划) | 1400 | 980 | `24px 32px 16px` outer + `10px 32px` for batch-bar/footer | Bottom padding 16 because table is flush to bottom; horizontal scroll inside `.tbl-wrap` |
+| `/sku/:id` (SKU 详情) | 1400 | 900 | `24px 32px 48px` | minWidth narrower (900) because detail page allows narrower viewports |
+
+**Rules**:
+- Don't introduce a new maxWidth (e.g., 1280, 1480). The number 1400 is locked to make 4-up KPI grids breathe and 22-column tables scroll inside.
+- Side padding is **always 32px**. Header rows, batch bars, footers within a route share this 32px alignment so the visual "rail" is consistent.
+- Top padding 24, bottom 48 — pages have more breathing at the bottom than the top so content doesn't feel jammed against the viewport edge.
 
 ### 5.2 Spacing scale
 
@@ -473,6 +496,24 @@ Density:      40px row default, tabular-nums on every number
 - [ ] No `transform: scale` on hover for cards larger than a button (Linear doesn't do this).
 - [ ] No element uses `border-radius` > 12px in data UI.
 - [ ] Page passes the squint test: should look like a quiet Linear/Vercel-class workspace, not a marketing page.
+
+---
+
+## Appendix 0 — Data Boundary Rule
+
+UI components **must not** read raw mock globals (`SKUS`, `DASH_STATS`, `TODAY_ACTIONS`) directly. All data comes from the Services layer:
+
+```js
+// ❌ DON'T (current legacy pattern)
+const queue = SKUS.filter(s => s.priority === 'p1');
+
+// ✅ DO (target pattern)
+const queue = await Services.sku.queue({ levels: ['p1', 'p2'], limit: 8 });
+```
+
+Components consume **view models** (e.g., `SkuSummary`, `DashboardSnapshot`), never raw DB columns. View model field names are stable; DB columns or REST response shapes can change without touching components.
+
+Implementation, refactor steps, REST contract, and field mapping are documented in the technical plan (link maintained in the project README / wiki). When adding a new data dependency, add a new method on `Services.<domain>` first, then call it from the component — never reach back into mock globals.
 
 ---
 

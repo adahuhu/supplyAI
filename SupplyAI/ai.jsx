@@ -107,7 +107,7 @@ function AIAnswer({ a, onSkuClick }) {
   );
 }
 
-function AIPanelHeader({ title, sub, badge, onClose }) {
+function AIPanelHeader({ title, sub, onClose, onToggleWide, wide }) {
   return (
     <div style={{ padding: '13px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', gap: 10, background: 'var(--surface)' }}>
       <div style={{
@@ -115,21 +115,29 @@ function AIPanelHeader({ title, sub, badge, onClose }) {
         background: 'var(--accent-soft)', color: 'var(--accent-text)',
         border: '1px solid rgba(94,106,210,.22)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
-      }}><Icon name="sparkles" size={14}/></div>
+      }}><Icon name="bot" size={14}/></div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="h3" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {title}
-          {badge && <span className="chip" style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)', borderColor: 'transparent', height: 18, fontSize: 10.5 }}>{badge}</span>}
-        </div>
+        <div className="h3">{title}</div>
         {sub && <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{sub}</div>}
       </div>
+      {onToggleWide && (
+        <button className="btn ghost icon sm" onClick={onToggleWide} title={wide ? '收回宽屏' : '宽屏模式'}>
+          <Icon name={wide ? 'arrow-right' : 'arrow-left'} size={14}/>
+        </button>
+      )}
       <button className="btn ghost icon sm" onClick={onClose}><Icon name="x" size={14}/></button>
     </div>
   );
 }
 
-function AIInput({ placeholder = '提问 SKU 风险、采购建议、规则影响…' }) {
+function AIInput({ placeholder = '提问 SKU 风险、采购建议、规则影响…', onSend, disabled }) {
   const [v, setV] = React.useState('');
+  const submit = () => {
+    const text = v.trim();
+    if (!text || disabled) return;
+    onSend && onSend(text);
+    setV('');
+  };
   return (
     <div style={{ padding: 12, borderTop: '1px solid var(--border)', background: 'var(--bg-sunken)' }}>
       <div style={{
@@ -142,38 +150,70 @@ function AIInput({ placeholder = '提问 SKU 风险、采购建议、规则影�
         <textarea
           value={v}
           onChange={e => setV(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
           placeholder={placeholder}
           rows={2}
+          disabled={disabled}
           style={{
             flex: 1, border: 0, outline: 'none', resize: 'none',
             background: 'transparent', color: 'inherit',
             fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.5,
           }}/>
-        <button className="btn icon" disabled={!v} style={{ background: v ? 'var(--accent)' : '', color: v ? '#fff' : '', borderColor: v ? 'var(--accent)' : '' }}>
+        <button className="btn icon" disabled={!v || disabled} onClick={submit}
+          style={{ background: v ? 'var(--accent)' : '', color: v ? '#fff' : '', borderColor: v ? 'var(--accent)' : '' }}>
           <Icon name="send" size={13}/>
         </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 11, color: 'var(--text-4)' }}>
         <Icon name="info" size={11}/>
-        <span>AI 回答基于最新计算快照与当前规则，不含节日预测</span>
+        <span>AI 回答基于最新计算快照与当前规则。回车发送 / Shift+回车换行</span>
       </div>
     </div>
   );
 }
 
 // ── Global AI ───────────────────────────────
-function GlobalAIPanel({ onClose, setRoute }) {
-  const [history, setHistory] = React.useState([
-    { role: 'ai', a: GLOBAL_AI_PRESETS[0].a, q: GLOBAL_AI_PRESETS[0].q },
-  ]);
+// 7 个 AI 场景 — 按飞书产品文档需求。
+// 每个场景对应一类决策:单 SKU/优先级/活动/风险/方案/新品/管理层。
+const GLOBAL_AI_QUESTIONS = [
+  { tag: '单 SKU 决策',     q: '挑一个高风险 SKU,告诉我还能卖多久,要不要补、补多少?' },
+  { tag: '本周补货优先级', q: '本周哪些 SKU 必须补货?按紧急度排序并说明原因。' },
+  { tag: '活动备货模拟',   q: 'Prime Day 想做到日销翻倍,要为哪些 SKU 备多少货、什么时候发?' },
+  { tag: '断货风险预警',   q: '这周有哪些爆款可能断货?预计损失销量和利润是多少?' },
+  { tag: '多方案对比',     q: '只海运 vs 海+空混合,成本和断货风险分别是什么?' },
+  { tag: '新品孵化建议',   q: '新品 3 周表现一般,要不要继续补货?优化哪些动作?' },
+  { tag: '管理层摘要',     q: '本周补货层面最大的风险、机会、决策点是什么?' },
+];
+
+function GlobalAIPanel({ onClose, setRoute, dashFilters, history, setHistory, wide, onToggleWide }) {
   const [thinking, setThinking] = React.useState(false);
-  const ask = (preset) => {
-    setHistory(h => [...h, { role: 'user', text: preset.q }]);
+  // 真正后端对话 — 自由文本走 /ai/chat,渲染纯文本气泡
+  const sendToBackend = async (text) => {
+    setHistory(h => [...h, { role: 'user', text }]);
     setThinking(true);
-    setTimeout(() => {
-      setHistory(h => [...h, { role: 'ai', a: preset.a, q: preset.q }]);
+    try {
+      const msgs = [];
+      for (const m of history) {
+        if (m.role === 'user' && m.text) msgs.push({ role: 'user', content: m.text });
+        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: m.text });
+      }
+      msgs.push({ role: 'user', content: text });
+      // 上下文:当前页 dashboard + 用户选的过滤
+      const context = { current_page: 'dashboard' };
+      if (dashFilters) {
+        const filters = {};
+        if (dashFilters.store) filters.mall_id = parseInt(dashFilters.store, 10);
+        if (dashFilters.country) filters.country_code = dashFilters.country;
+        if (dashFilters.owner) filters.owner = dashFilters.owner;
+        if (Object.keys(filters).length) context.filters = filters;
+      }
+      const resp = await window.api.aiChat(msgs, context);
+      setHistory(h => [...h, { role: 'ai', text: resp.content }]);
+    } catch (err) {
+      setHistory(h => [...h, { role: 'ai', text: '⚠️ 调用失败:' + err.message }]);
+    } finally {
       setThinking(false);
-    }, 700);
+    }
   };
 
   return (
@@ -181,8 +221,9 @@ function GlobalAIPanel({ onClose, setRoute }) {
       <AIPanelHeader
         title="全局 AI 助手"
         sub={'基于 ' + fmt.dateLong(DASH_STATS.asOf) + ' ' + fmt.time(DASH_STATS.asOf) + ' 快照'}
-        badge="Dashboard"
         onClose={onClose}
+        onToggleWide={onToggleWide}
+        wide={wide}
       />
 
       <div style={{ flex: 1, overflow: 'auto', padding: 14, background: 'linear-gradient(180deg, rgba(255,255,255,.018), transparent 140px)' }}>
@@ -191,11 +232,9 @@ function GlobalAIPanel({ onClose, setRoute }) {
             ? <AIBubble key={i} role="user">{m.text}</AIBubble>
             : (
               <AIBubble key={i} role="ai">
-                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>{m.q}</div>
-                <AIAnswer a={m.a} onSkuClick={(it) => {
-                  const sku = SKUS.find(s => s.msku === it.msku) || SKUS[0];
-                  setRoute({ page: 'sku', skuId: sku.id });
-                }}/>
+                {m.q && <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>{m.q}</div>}
+                <div style={{ fontSize: 12.5, lineHeight: 1.55 }}
+                  dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
               </AIBubble>
             )
         ))}
@@ -208,41 +247,91 @@ function GlobalAIPanel({ onClose, setRoute }) {
         )}
 
         <div style={{ marginTop: 16 }}>
-          <div className="label" style={{ marginBottom: 8 }}>常用问题</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {[...GLOBAL_AI_PRESETS, { q: '风险最高的 5 个是什么？' }, { q: '哪些商品建议立即采购？' }].map((p, i) => (
-              <button key={i} onClick={() => p.a && ask(p)} className="btn ghost" style={{
-                justifyContent: 'flex-start', height: 'auto', padding: '8px 10px',
+          <div className="label" style={{ marginBottom: 8 }}>常用场景</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+            {GLOBAL_AI_QUESTIONS.map((item, i) => (
+              <button key={i} onClick={() => sendToBackend(item.q)} disabled={thinking} className="btn ghost" style={{
+                justifyContent: 'flex-start', height: 'auto', padding: '10px 12px',
                 textAlign: 'left', border: '1px solid var(--border)',
                 background: 'var(--surface)',
+                flexDirection: 'column', alignItems: 'flex-start', gap: 4,
               }}>
-                <Icon name="sparkles" size={11} color="var(--text-3)"/>
-                <span style={{ fontSize: 12 }}>{p.q}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+                  <Icon name="sparkles" size={11} color="var(--accent)"/>
+                  <span style={{
+                    fontSize: 10.5, fontWeight: 500,
+                    color: 'var(--accent-text)',
+                    background: 'var(--accent-soft)',
+                    padding: '1px 6px', borderRadius: 4,
+                  }}>{item.tag}</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45, whiteSpace: 'normal', textAlign: 'left' }}>{item.q}</div>
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      <AIInput/>
+      <AIInput onSend={sendToBackend} disabled={thinking}/>
     </div>
   );
 }
 
 // ── SKU AI ────────────────────────────────
-function SKUAIPanel({ sku, onClose, mode }) {
-  const presets = SKU_AI_PRESETS(sku);
-  const [history, setHistory] = React.useState([
-    { role: 'ai', a: presets[0].a, q: presets[0].q },
-  ]);
+const skuQuestions = (sku) => [
+  `为什么 ${sku.msku} 是 ${(sku.priority || '').toUpperCase()}?`,
+  '为什么建议这个采购数量?',
+  '安全天数改成 21 会怎样?',
+  '哪些因素影响最大?',
+];
+
+function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWide }) {
   const [thinking, setThinking] = React.useState(false);
-  const ask = (preset) => {
-    setHistory(h => [...h, { role: 'user', text: preset.q }]);
+  // 挂载后调 /ai/explain — 仅在该 SKU 历史为空时(首次打开),已有历史就跳过
+  React.useEffect(() => {
+    if (!window.api || !sku.listingId) return;
+    if (history && history.length > 0) return; // 已有对话,不重复 explain
+    let cancelled = false;
     setThinking(true);
-    setTimeout(() => {
-      setHistory(h => [...h, { role: 'ai', a: preset.a, q: preset.q }]);
+    window.api.aiExplain(sku.listingId).then(resp => {
+      if (cancelled) return;
+      setHistory(h => [...h, { role: 'ai', text: resp.explanation, q: 'AI 解释' }]);
+    }).catch(err => {
+      if (cancelled) return;
+      setHistory(h => [...h, { role: 'ai', text: '⚠️ 解释获取失败:' + err.message, q: 'AI 解释' }]);
+    }).finally(() => { if (!cancelled) setThinking(false); });
+    return () => { cancelled = true; };
+  }, [sku.listingId]);
+
+  const sendToBackend = async (text) => {
+    setHistory(h => [...h, { role: 'user', text }]);
+    setThinking(true);
+    try {
+      const msgs = [];
+      for (const m of history) {
+        if (m.role === 'user' && m.text) msgs.push({ role: 'user', content: m.text });
+        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: m.text });
+      }
+      msgs.push({ role: 'user', content: text });
+      // 上下文:当前 SKU 完整信息,Orchestrator 注入到 system prompt
+      const context = {
+        current_page: 'sku',
+        sku: {
+          msku: sku.msku,
+          listing_id: sku.listingId,
+          mall_id: sku.mallId,
+          store_name: sku.store,
+          country_code: sku.country?.code,
+          priority: sku.priority,
+        },
+      };
+      const resp = await window.api.aiChat(msgs, context);
+      setHistory(h => [...h, { role: 'ai', text: resp.content }]);
+    } catch (err) {
+      setHistory(h => [...h, { role: 'ai', text: '⚠️ 调用失败:' + err.message }]);
+    } finally {
       setThinking(false);
-    }, 700);
+    }
   };
 
   return (
@@ -250,8 +339,9 @@ function SKUAIPanel({ sku, onClose, mode }) {
       <AIPanelHeader
         title="SKU 分析助手"
         sub={sku.msku + ' · ' + sku.store + ' · 快照 ' + fmt.time(DASH_STATS.asOf)}
-        badge={'绑定 ' + sku.msku.slice(-3)}
         onClose={onClose}
+        onToggleWide={onToggleWide}
+        wide={wide}
       />
 
       <div style={{ flex: 1, overflow: 'auto', padding: 14, background: 'linear-gradient(180deg, rgba(255,255,255,.018), transparent 140px)' }}>
@@ -275,8 +365,9 @@ function SKUAIPanel({ sku, onClose, mode }) {
             ? <AIBubble key={i} role="user">{m.text}</AIBubble>
             : (
               <AIBubble key={i} role="ai">
-                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>{m.q}</div>
-                <AIAnswer a={m.a}/>
+                {m.q && <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>{m.q}</div>}
+                <div style={{ fontSize: 12.5, lineHeight: 1.55 }}
+                  dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
               </AIBubble>
             )
         ))}
@@ -291,37 +382,21 @@ function SKUAIPanel({ sku, onClose, mode }) {
         <div style={{ marginTop: 8 }}>
           <div className="label" style={{ marginBottom: 8 }}>常用问题</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {presets.map((p, i) => (
-              <button key={i} onClick={() => ask(p)} className="btn ghost" style={{
+            {skuQuestions(sku).map((q, i) => (
+              <button key={i} onClick={() => sendToBackend(q)} disabled={thinking} className="btn ghost" style={{
                 justifyContent: 'flex-start', height: 'auto', padding: '8px 10px',
                 textAlign: 'left', border: '1px solid var(--border)',
                 background: 'var(--surface)',
               }}>
                 <Icon name="sparkles" size={11} color="var(--text-3)"/>
-                <span style={{ fontSize: 12 }}>{p.q}</span>
+                <span style={{ fontSize: 12 }}>{q}</span>
               </button>
             ))}
-            <button className="btn ghost" style={{
-              justifyContent: 'flex-start', height: 'auto', padding: '8px 10px',
-              textAlign: 'left', border: '1px solid var(--border)',
-              background: 'var(--surface)',
-            }}>
-              <Icon name="sparkles" size={11} color="var(--text-3)"/>
-              <span style={{ fontSize: 12 }}>它什么时候会断货？</span>
-            </button>
-            <button className="btn ghost" style={{
-              justifyContent: 'flex-start', height: 'auto', padding: '8px 10px',
-              textAlign: 'left', border: '1px solid var(--border)',
-              background: 'var(--surface)',
-            }}>
-              <Icon name="sparkles" size={11} color="var(--text-3)"/>
-              <span style={{ fontSize: 12 }}>帮我生成采购计划</span>
-            </button>
           </div>
         </div>
       </div>
 
-      <AIInput placeholder="向 AI 追问 SKU 风险、采购量、规则影响…"/>
+      <AIInput placeholder="向 AI 追问 SKU 风险、采购量、规则影响…" onSend={sendToBackend} disabled={thinking}/>
     </div>
   );
 }

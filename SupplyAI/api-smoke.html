@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<title>SupplyAI · API Smoke 测试</title>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: 24px; max-width: 1100px; margin: 0 auto; background: #0e1116; color: #e6edf3; }
+  h1 { font-size: 16px; }
+  h2 { font-size: 14px; margin-top: 18px; color: #7fa9ff; }
+  .ok { color: #56d364; }
+  .err { color: #ff7b72; }
+  .label { color: #8b949e; }
+  pre { background: #161b22; padding: 12px; border-radius: 6px; overflow: auto; font-size: 12px; max-height: 320px; }
+  .row { display: flex; gap: 12px; align-items: baseline; padding: 4px 0; }
+</style>
+<script src="api.jsx"></script>
+<script src="adapter.jsx"></script>
+</head>
+<body>
+<h1>SupplyAI · 前后端链路 Smoke 测试</h1>
+<div class="row"><span class="label">API base:</span> <span id="base"></span></div>
+<div id="results"></div>
+
+<script>
+const r = document.getElementById('results');
+document.getElementById('base').textContent = window.api.base;
+
+function logSection(title, status, body) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `<h2>${title} <span class="${status === 'ok' ? 'ok' : 'err'}">${status === 'ok' ? '✔ OK' : '✘ FAIL'}</span></h2>`;
+  const pre = document.createElement('pre');
+  pre.textContent = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+  wrap.appendChild(pre);
+  r.appendChild(wrap);
+}
+
+(async function () {
+  // 1. health
+  try {
+    const h = await window.api.health();
+    logSection('1. GET /_health', 'ok', h);
+  } catch (e) {
+    logSection('1. GET /_health', 'err', e.message);
+    return;
+  }
+
+  // 2. dashboard.snapshot
+  let snapshot;
+  try {
+    snapshot = await window.api.dashboardSnapshot();
+    logSection('2. POST /dashboard/snapshot', 'ok', snapshot);
+  } catch (e) {
+    logSection('2. POST /dashboard/snapshot', 'err', e.message);
+    return;
+  }
+
+  // 3. skus.list
+  let listResp;
+  try {
+    listResp = await window.api.skusList({ page: 1, page_size: 5 });
+    logSection('3. POST /skus/list (top 5)', 'ok', listResp);
+  } catch (e) {
+    logSection('3. POST /skus/list', 'err', e.message);
+    return;
+  }
+
+  // 4. adapter 转换 — 验证 ViewModel 字段齐全
+  try {
+    const skus = listResp.rows.map(window.adapter.adaptSkuSummary);
+    const stats = window.adapter.adaptDashStats(snapshot, skus);
+    logSection('4. Adapter ViewModel 输出', 'ok', { skus_first: skus[0], stats });
+  } catch (e) {
+    logSection('4. Adapter', 'err', e.message);
+    return;
+  }
+
+  // 5. risk-queue
+  try {
+    const q = await window.api.riskQueue({ limit: 3 });
+    logSection('5. POST /dashboard/risk-queue', 'ok', q);
+  } catch (e) {
+    logSection('5. POST /dashboard/risk-queue', 'err', e.message);
+  }
+
+  // 6. sku.detail (用 list 第一行的 listing_id)
+  if (listResp.rows.length) {
+    try {
+      const detail = await window.api.skuDetail(listResp.rows[0].listing_id);
+      logSection('6. POST /skus/detail', 'ok', { summary: detail.summary, forecast_len: detail.forecast_trend.length, inbound_len: detail.inbound_list.length });
+    } catch (e) {
+      logSection('6. POST /skus/detail', 'err', e.message);
+    }
+  }
+
+  // 7. ai.explain
+  if (listResp.rows.length) {
+    try {
+      const exp = await window.api.aiExplain(listResp.rows[0].listing_id);
+      logSection('7. POST /ai/explain', 'ok', exp);
+    } catch (e) {
+      logSection('7. POST /ai/explain', 'err', e.message);
+    }
+  }
+})();
+</script>
+</body>
+</html>

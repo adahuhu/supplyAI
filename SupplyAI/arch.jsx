@@ -2,7 +2,7 @@
 
 function ArchPage({ setRoute }) {
   return (
-    <div style={{ padding: '20px 24px 40px', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ padding: '24px 32px 48px', maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div>
         <div className="h1">信息架构 & 用户路径</div>
         <div style={{ fontSize: 12.5, color: 'var(--text-3)', marginTop: 4 }}>

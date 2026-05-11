@@ -15,6 +15,7 @@ function Icon({ name, size = 14, stroke = 1.6, color = 'currentColor', style }) 
     case 'home': return <svg {...common}><path d="M3 9.5 12 3l9 6.5V21H3z"/><path d="M9 21V12h6v9"/></svg>;
     case 'list': return <svg {...common}><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>;
     case 'sparkles': return <svg {...common}><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>;
+    case 'bot': return <svg {...common}><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>;
     case 'settings': return <svg {...common}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>;
     case 'box': return <svg {...common}><path d="m21 8-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>;
     case 'truck': return <svg {...common}><path d="M1 3h15v13H1zM16 8h4l3 3v5h-7"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>;
@@ -86,6 +87,71 @@ function Sparkline({ data, width = 80, height = 24, color = 'var(--accent)', fil
   );
 }
 
+// ── ChartArea — 历史 + 预测的拼接折线 ──────────────
+// 历史段实线 + 渐变面;预测段虚线、不填充;最后一个历史点和第一个预测点连续。
+function ChartArea({ history = [], future = [], height = 140, color = 'var(--accent)' }) {
+  const all = [...history, ...future];
+  if (all.length === 0) {
+    return (
+      <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: 'var(--text-4)' }}>
+        暂无趋势数据
+      </div>
+    );
+  }
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  const range = max - min || 1;
+  const padY = 10;
+  const padX = 6;
+  const innerW = (w) => w - padX * 2;
+  const innerH = height - padY * 2;
+  const id = 'ca-' + Math.random().toString(36).slice(2, 8);
+  return (
+    <div style={{ width: '100%', position: 'relative' }}>
+      <svg viewBox={`0 0 800 ${height}`} preserveAspectRatio="none" width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.22"/>
+            <stop offset="100%" stopColor={color} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        {(() => {
+          const W = 800;
+          const totalN = all.length;
+          const stepX = innerW(W) / Math.max(1, totalN - 1);
+          const points = all.map((v, i) => [padX + i * stepX, padY + (1 - (v - min) / range) * innerH]);
+
+          const histPts = points.slice(0, history.length);
+          // 让 future 段从 history 最后一点延续(避免视觉断层)
+          const futStart = history.length > 0 ? history.length - 1 : 0;
+          const futPts = points.slice(futStart);
+
+          const histPath = histPts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+          const futPath = futPts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+          const area = histPath
+            ? `${histPath} L${histPts[histPts.length - 1][0]},${height} L${histPts[0][0]},${height} Z`
+            : '';
+
+          // 分隔线 — history / future 边界
+          const boundaryX = history.length > 0 ? padX + (history.length - 1) * stepX : null;
+
+          return (
+            <>
+              {histPath && <path d={area} fill={`url(#${id})`}/>}
+              {histPath && <path d={histPath} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round"/>}
+              {futPath && <path d={futPath} fill="none" stroke={color} strokeWidth="1.6" strokeDasharray="4 4" strokeLinejoin="round" strokeLinecap="round" opacity="0.85"/>}
+              {boundaryX != null && (
+                <line x1={boundaryX} x2={boundaryX} y1={padY} y2={height - padY}
+                  stroke="var(--border)" strokeDasharray="2 3" strokeWidth="1"/>
+              )}
+            </>
+          );
+        })()}
+      </svg>
+    </div>
+  );
+}
+
 // ── Sparkbar ──────────────────────────
 function Sparkbar({ data, width = 80, height = 24, color = 'var(--text-3)' }) {
   const max = Math.max(...data, 1);
@@ -134,6 +200,38 @@ function StackedBar({ segments, height = 6 }) {
       ))}
     </div>
   );
+}
+
+// ── ErrorBoundary — 防止单个组件 throw 后整页黑屏 ──────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(err, info) { console.error('[ErrorBoundary]', err, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{
+          padding: 16, margin: 12,
+          border: '1px solid var(--p1)',
+          borderRadius: 'var(--r)',
+          background: 'var(--p1-soft)',
+          color: 'var(--p1-strong)',
+          fontSize: 12, lineHeight: 1.55,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>组件渲染异常</div>
+          <div className="mono" style={{ fontSize: 11, opacity: 0.85, whiteSpace: 'pre-wrap' }}>
+            {String(this.state.error?.message || this.state.error)}
+          </div>
+          <button className="btn sm" style={{ marginTop: 10 }}
+            onClick={() => this.setState({ error: null })}>重试</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ── Drawer ──────────────────────────
@@ -286,13 +384,13 @@ function NumDisplay({ value, currency, unit, color, size = 32 }) {
 }
 
 // ── Trend chip (↑ 2.4%) ─────────────────────────
-function TrendChip({ value, suffix = '%' }) {
+function TrendChip({ value, suffix = '%', tooltip = '较昨日' }) {
   if (value == null) return null;
   const dir = value > 0.05 ? 'up' : value < -0.05 ? 'down' : 'flat';
   const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '→';
   const sign = value > 0 ? '+' : '';
   return (
-    <span className={'trend ' + dir}>
+    <span className={'trend ' + dir} title={tooltip}>
       <span style={{ fontSize: '0.95em', lineHeight: 1 }}>{arrow}</span>
       {sign}{value.toFixed(1)}{suffix}
     </span>
@@ -300,7 +398,7 @@ function TrendChip({ value, suffix = '%' }) {
 }
 
 Object.assign(window, {
-  Icon, Sparkline, Sparkbar, Donut, StackedBar,
+  Icon, Sparkline, Sparkbar, ChartArea, Donut, StackedBar,
   Drawer, Modal, Toast, PriorityBadge, KV, ProductImage, fmt,
-  NumDisplay, TrendChip,
+  NumDisplay, TrendChip, ErrorBoundary,
 });

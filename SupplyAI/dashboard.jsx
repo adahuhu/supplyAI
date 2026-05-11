@@ -66,7 +66,7 @@ function FinancialSummary() {
       gap: 12
     }}>
 
-      {/* Hero — 昨日利润 (左, span 2 行, 独立卡片) */}
+      {/* Hero — 今日利润 (左, span 2 行, 独立卡片) */}
       <div className="card" style={{
         gridRow: 'span 2',
         padding: '18px 22px',
@@ -74,15 +74,15 @@ function FinancialSummary() {
         minHeight: 168,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <span style={{ fontSize: 11.5, color: 'var(--text-3)', fontWeight: 500, letterSpacing: '-0.005em' }}>昨日利润</span>
-          <TrendChip value={2.4}/>
+          <span style={{ fontSize: 11.5, color: 'var(--text-3)', fontWeight: 500, letterSpacing: '-0.005em' }}>今日利润</span>
+          {stats.profitTrendPct != null && <TrendChip value={stats.profitTrendPct}/>}
         </div>
         <div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 18, color: 'var(--text-3)', fontWeight: 500 }}>$</span>
             <span className="tabular" style={{ fontSize: 36, fontWeight: 600, letterSpacing: '-0.026em', lineHeight: 1 }}>{fmt.num(stats.profitY)}</span>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>毛利率 {grossRate}%</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>毛利率 {grossRate}% · 较昨日</div>
         </div>
         <Sparkline data={stats.profitTrend} width={260} height={36}
           color="var(--accent)" strokeWidth={1.5}/>
@@ -90,20 +90,20 @@ function FinancialSummary() {
 
       {/* 4 个独立小卡 — 销量 / 收入 / 成本 / 费用 */}
       <div className="card" style={{ padding: '14px 18px' }}>
-        <MiniStat label="昨日销量" value={fmt.num(stats.salesY)} unit="件"
-          trendPct={stats.salesTrendPct} sub="全店铺合计"/>
+        <MiniStat label="今日销量" value={fmt.num(stats.salesY)} unit="件"
+          trendPct={stats.salesTrendPct} sub="全店铺合计 · 较昨日"/>
       </div>
       <div className="card" style={{ padding: '14px 18px' }}>
-        <MiniStat label="昨日收入" value={fmt.num(stats.gmvY)} currency="$"
-          trendPct={-1.8} sub="全店铺合计"/>
+        <MiniStat label="今日收入" value={fmt.num(stats.gmvY)} currency="$"
+          trendPct={stats.gmvTrendPct} sub="全店铺合计 · 较昨日"/>
       </div>
       <div className="card" style={{ padding: '14px 18px' }}>
-        <MiniStat label="昨日成本" value={fmt.num(stats.costY)} currency="$"
-          trendPct={-0.6} sub="采购 + 头程"/>
+        <MiniStat label="今日成本" value={fmt.num(stats.costY)} currency="$"
+          trendPct={stats.costTrendPct} sub="采购 + 头程 · 较昨日"/>
       </div>
       <div className="card" style={{ padding: '14px 18px' }}>
-        <MiniStat label="昨日费用" value={fmt.num(stats.expenseY)} currency="$"
-          trendPct={0.3} sub="平台 + 配送"/>
+        <MiniStat label="今日费用" value={fmt.num(stats.expenseY)} currency="$"
+          trendPct={stats.expenseTrendPct} sub="平台 + 配送 · 较昨日"/>
       </div>
     </div>
   );
@@ -186,10 +186,6 @@ function HeroSummary({ setRoute, openCreatePO }) {
           <span>
             涉及 <span className="tabular" style={{ fontWeight: 500 }}>{data.storeCount}</span> 个店铺
           </span>
-          <span style={{ color: 'var(--text-4)' }}>·</span>
-          <span>
-            预计采购金额 <span className="tabular" style={{ fontWeight: 500 }}>${fmt.num(data.totalAmount)}</span>
-          </span>
         </div>
       </div>
 
@@ -221,20 +217,41 @@ function HeroSummary({ setRoute, openCreatePO }) {
 
 }
 
-function Dashboard({ setRoute, openAI, openCreatePO }) {
+// action_hint 标签映射
+const ACTION_HINT_META = {
+  urgent_purchase: { label: '紧急采购', cls: 'p1' },
+  follow_up:       { label: '跟进',     cls: 'p2' },
+  review:          { label: '复核',     cls: 'p3' },
+  ok:              { label: '正常',     cls: 'safe' },
+};
+
+function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters }) {
   const stats = DASH_STATS;
+  // /dashboard/risk-queue 返回的 listing_id → action_hint 映射
+  const [actionHintMap, setActionHintMap] = React.useState({});
+
+  React.useEffect(() => {
+    if (!window.api) return;
+    let cancelled = false;
+    window.api.riskQueue({ limit: 30 }).then(resp => {
+      if (cancelled) return;
+      const m = {};
+      for (const r of (resp.rows || [])) m[r.listing_id] = r.action_hint;
+      setActionHintMap(m);
+    }).catch(() => { /* 静默降级,client-side filter 仍可用 */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const queue = SKUS.filter((s) => s.priority === 'p1' || s.priority === 'p2').slice(0, 8);
 
   return (
-    <div style={{ padding: '24px 32px 48px', display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1400, minWidth: 980, margin: '0 auto' }}>
+    <div style={{ padding: '24px 32px 48px', maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* Header — title only, no prose subtitle (Linear style) */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div className="h1" style={{ minWidth: 0 }}><span className="marker" />分析工作台</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Filter label="店铺" value="全部 (6)" />
-          <Filter label="国家" value="全部 (6)" />
-          <Filter label="负责人" value="全部" />
+          <DashboardFilters filters={dashFilters} setFilters={setDashFilters}/>
         </div>
       </div>
 
@@ -263,30 +280,35 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
         </div>
 
         {/* Hero panel — 库存健康概览 (full width, horizontal 3-zone) */}
-        <Panel title="库存健康概览" sub="基于全部活跃 SKU + 店铺组合">
+        <Panel title="库存健康概览" sub="基于 MSKU + 店铺组合计算">
           <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>
 
-            {/* Donut */}
-            <div style={{ position: 'relative', width: 116, height: 116, flex: 'none' }}>
-              <Donut size={116} thickness={13}
-                values={[stats.counts.p1, stats.counts.p2, stats.counts.p3, stats.counts.safe]}
-                colors={['var(--p1)', 'var(--p2)', 'var(--p3)', 'var(--safe)']} />
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div className="tabular" style={{ fontSize: 28, fontWeight: 540, letterSpacing: '-0.022em', lineHeight: 1 }}>{stats.healthScore}</div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 3 }}>健康分</div>
-              </div>
-            </div>
+            {/* Donut — 中间显示总 SKU 数,百分比分母用 counts 总和,与扇区严格自洽 */}
+            {(() => {
+              const c = stats.counts || {};
+              const total = (c.p1 || 0) + (c.p2 || 0) + (c.p3 || 0) + (c.safe || 0);
+              return (
+                <>
+                  <div style={{ position: 'relative', width: 116, height: 116, flex: 'none' }}>
+                    <Donut size={116} thickness={13}
+                      values={[c.p1, c.p2, c.p3, c.safe]}
+                      colors={['var(--p1)', 'var(--p2)', 'var(--p3)', 'var(--safe)']} />
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <div className="tabular" style={{ fontSize: 28, fontWeight: 540, letterSpacing: '-0.022em', lineHeight: 1 }}>{total}</div>
+                      <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 3 }}>SKU 总数</div>
+                    </div>
+                  </div>
 
-            {/* Risk distribution — 4 horizontal columns */}
-            <div style={{ flex: 1, minWidth: 280, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-              {[
-                ['p1', 'P1 紧急'],
-                ['p2', 'P2 重要'],
-                ['p3', 'P3 关注'],
-                ['safe', '安全']
-              ].map(([k, l]) => {
-                const v = stats.counts[k];
-                const pct = Math.round((v / SKUS.length) * 100);
+                  {/* Risk distribution — 4 horizontal columns */}
+                  <div style={{ flex: 1, minWidth: 280, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+                    {[
+                      ['p1', 'P1 紧急'],
+                      ['p2', 'P2 重要'],
+                      ['p3', 'P3 关注'],
+                      ['safe', '安全']
+                    ].map(([k, l]) => {
+                      const v = c[k] || 0;
+                      const pct = total > 0 ? Math.round((v / total) * 100) : 0;
                 return (
                   <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-2)', fontWeight: 500 }}>
@@ -294,23 +316,26 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
                       <span>{l}</span>
                     </div>
                     <div className="tabular" style={{ fontSize: 26, fontWeight: 540, letterSpacing: '-0.022em', lineHeight: 1 }}>{v}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{pct}% 占比</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{pct}% 占比</div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
 
-            {/* Right vertical stats */}
-            <div style={{
-              flex: 'none', minWidth: 132,
-              borderLeft: '1px solid var(--border)',
-              paddingLeft: 24,
-              display: 'flex', flexDirection: 'column', gap: 12
-            }}>
-              <KV k="总库存" v={fmt.num(stats.totalStock) + ' 件'} />
-              <KV k="近 7 天销量" v={fmt.num(stats.totalSales7) + ' 件'} />
-              <KV k="平均可售天数" v="42 天" />
-            </div>
+                  {/* Right vertical stats */}
+                  <div style={{
+                    flex: 'none', minWidth: 132,
+                    borderLeft: '1px solid var(--border)',
+                    paddingLeft: 24,
+                    display: 'flex', flexDirection: 'column', gap: 12
+                  }}>
+                    <KV k="总库存" v={fmt.num(stats.totalStock) + ' 件'} />
+                    <KV k="近 7 天销量" v={fmt.num(stats.totalSales7) + ' 件'} />
+                    <KV k="SKU 总数" v={total + ' 个'} />
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </Panel>
 
@@ -367,7 +392,6 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
           <div className="card" style={{ padding: '12px 16px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <span style={{ fontSize: 11.5, color: 'var(--text-2)', fontWeight: 500, letterSpacing: '-0.005em' }}>下一个大促</span>
-              <button className="btn sm ghost" style={{ height: 22, padding: '0 6px', fontSize: 11.5 }}>参考历史 →</button>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
               <div className="tabular" style={{
@@ -392,7 +416,11 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
           sub={<span>按 P1 → P2排序 · <span style={{ color: 'var(--p1)', fontWeight: 600 }}>{stats.stockout7}</span> 个 SKU 将在 7 天内断货</span>}
           right={
           <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn sm primary"><Icon name="lightning" size={12} />批量生成采购计划</button>
+            <button className="btn sm primary"
+              onClick={() => openCreatePO(queue.map(s => s.id))}
+              disabled={queue.length === 0}>
+              <Icon name="lightning" size={12} />批量生成采购计划
+            </button>
           </div>
           }
           noPad>
@@ -404,6 +432,7 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
                 <th style={{ width: 28 }}><input type="checkbox" /></th>
                 <th style={{ width: 56 }}>风险</th>
                 <th>SKU</th>
+                <th>MSKU</th>
                 <th>店铺 / 国家</th>
                 <th className="num">未来日销</th>
                 <th className="num">总库存</th>
@@ -411,7 +440,6 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
                 <th>预计断货</th>
                 <th className="num">建议采购</th>
                 <th>建议采购时间</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -425,10 +453,11 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
                       <ProductImage label={s.msku.slice(-3)} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-3)' }} className="mono">{s.msku} · {s.sku}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-3)' }} className="mono">{s.sku}</div>
                       </div>
                     </div>
                   </td>
+                  <td className="mono" style={{ fontSize: 12, color: 'var(--text-2)' }}>{s.msku}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span>{s.country.flag}</span>
@@ -443,9 +472,6 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
                   <td className="tabular">{fmt.dateLong(s.stockoutDate)}<span style={{ color: 'var(--text-3)', marginLeft: 6, fontSize: 11 }}>{fmt.rel(s.stockoutDate)}</span></td>
                   <td className="num tabular" style={{ fontWeight: 500 }}>{fmt.num(s.suggestQty)}</td>
                   <td className="tabular" style={{ color: 'var(--text-2)' }}>{fmt.dateLong(s.purchaseDate)}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button className="btn sm ghost"><Icon name="more" size={14} /></button>
-                  </td>
                 </tr>
                 )}
             </tbody>
@@ -454,39 +480,152 @@ function Dashboard({ setRoute, openAI, openCreatePO }) {
       </Panel>
 
       <Panel title="需关注" sub="数据质量 · 规则配置 · 风险变化">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-          {TODAY_ACTIONS.map((a, i) =>
-            <div key={a.id} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '10px 0',
-              borderBottom: i < TODAY_ACTIONS.length - 1 ? '1px solid var(--border)' : 'none',
-              minWidth: 0
-            }}>
-              <span className={'dot ' + (a.kind === 'urgent' ? 'p1' : a.kind === 'review' ? 'p2' : 'p3')} style={{ flex: 'none' }} />
-              <div style={{ flex: 1, minWidth: 0 }} title={a.title}>
-                <div style={{
-                  fontSize: 12.5,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>{a.title}</div>
+        {TODAY_ACTIONS.length === 0 ? (
+          <div style={{ padding: '20px 4px', fontSize: 12, color: 'var(--text-3)', textAlign: 'center' }}>
+            暂无告警 · 待 <span className="mono">/dashboard/data-quality-alerts</span> 端点上线后接入
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {TODAY_ACTIONS.map((a, i) =>
+              <div key={a.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 0',
+                borderBottom: i < TODAY_ACTIONS.length - 1 ? '1px solid var(--border)' : 'none',
+                minWidth: 0
+              }}>
+                <span className={'dot ' + (a.kind === 'urgent' ? 'p1' : a.kind === 'review' ? 'p2' : 'p3')} style={{ flex: 'none' }} />
+                <div style={{ flex: 1, minWidth: 0 }} title={a.title}>
+                  <div style={{
+                    fontSize: 12.5,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}>{a.title}</div>
+                </div>
+                <button className="btn sm ghost"
+                  onClick={() => {
+                    // 按告警 kind 跳到对应排查视图
+                    if (a.kind === 'review') setRoute({ page: 'list', filter: 'p1' });
+                    else if (a.kind === 'rule') setRoute({ page: 'list', filter: 'suggest' });
+                    else setRoute({ page: 'list', filter: 'suggest' });
+                  }}
+                  style={{ color: 'var(--accent-text)', flex: 'none' }}>{a.action || '查看'} →</button>
               </div>
-              <button className="btn sm ghost" style={{ color: 'var(--accent-text)', flex: 'none' }}>{a.action} →</button>
-            </div>
-            )}
-        </div>
+              )}
+          </div>
+        )}
       </Panel>
       </div>
     </div>);
 
 }
-function Filter({ label, value, onClick }) {
+// Dashboard 顶部三个过滤器 — 选中后通过 setDashFilters 触发 App 层重新拉数据.
+function DashboardFilters({ filters, setFilters }) {
+  const f = window.FILTERS_DATA || { stores: [], countries: [], owners: [] };
+  const update = (key, value) => setFilters((cur) => ({ ...cur, [key]: value }));
+
   return (
-    <button className="btn" onClick={onClick} style={{ paddingRight: 8 }}>
-      <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>{label}</span>
-      <span style={{ fontWeight: 500 }}>{value}</span>
-      <Icon name="chevron-down" size={12} color="var(--text-3)" />
-    </button>);
+    <>
+      <Filter label="店铺" options={f.stores}
+        selectedValue={filters.store}
+        onChange={(v) => update('store', v)}/>
+      <Filter label="国家" options={f.countries}
+        selectedValue={filters.country}
+        onChange={(v) => update('country', v)}/>
+      <Filter label="负责人" options={f.owners}
+        selectedValue={filters.owner}
+        onChange={(v) => update('owner', v)}/>
+    </>
+  );
+}
+
+// 真下拉过滤器 — 两种用法:
+//   新 API(实装): <Filter label="店铺" options={[...]} selectedValue={...} onChange={fn}/>
+//   兼容旧调用(装饰):<Filter label="时间" value="近 7 天"/> — 灰色 + tooltip 标 "尚未接入"
+function Filter({ label, options, selectedValue, onChange, value }) {
+  const isPlaceholder = options === undefined && value !== undefined;
+  if (isPlaceholder) {
+    return (
+      <button className="btn" disabled
+        title="该筛选项尚未接入后端,占位中"
+        style={{ paddingRight: 8, opacity: 0.55, cursor: 'not-allowed' }}>
+        <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>{label}</span>
+        <span style={{ fontWeight: 500 }}>{value}</span>
+        <Icon name="chevron-down" size={12} color="var(--text-3)" />
+      </button>
+    );
+  }
+
+  const safeOptions = options || [];
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const selected = safeOptions.find((o) => o.value === selectedValue);
+  const totalCount = safeOptions.reduce((s, o) => s + (o.count || 0), 0);
+  const valueText = selected ? selected.label : `全部 (${safeOptions.length})`;
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button className="btn" onClick={() => setOpen((v) => !v)} style={{ paddingRight: 8 }}>
+        <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>{label}</span>
+        <span style={{ fontWeight: 500 }}>{valueText}</span>
+        <Icon name="chevron-down" size={12} color="var(--text-3)" />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+          minWidth: 220, maxHeight: 360, overflow: 'auto',
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 'var(--r-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+          padding: 4, zIndex: 100,
+        }}>
+          <div
+            onClick={() => { onChange?.(null); setOpen(false); }}
+            style={{
+              padding: '8px 10px', fontSize: 12.5, cursor: 'pointer',
+              color: !selectedValue ? 'var(--accent-text)' : 'var(--text-2)',
+              fontWeight: !selectedValue ? 600 : 400,
+              borderRadius: 4,
+              background: !selectedValue ? 'var(--accent-soft)' : 'transparent',
+            }}>
+            全部
+          </div>
+          {safeOptions.length === 0 && (
+            <div style={{ padding: '8px 10px', fontSize: 11.5, color: 'var(--text-4)' }}>无数据</div>
+          )}
+          {safeOptions.map((o) => {
+            const active = o.value === selectedValue;
+            return (
+              <div
+                key={o.value}
+                onClick={() => { onChange?.(o.value); setOpen(false); }}
+                style={{
+                  padding: '8px 10px', fontSize: 12.5, cursor: 'pointer',
+                  color: active ? 'var(--accent-text)' : 'var(--text-2)',
+                  fontWeight: active ? 600 : 400,
+                  borderRadius: 4,
+                  background: active ? 'var(--accent-soft)' : 'transparent',
+                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--surface-hover)'; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {o.label}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Panel({ title, sub, right, children, noPad, style }) {

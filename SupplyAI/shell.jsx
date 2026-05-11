@@ -5,7 +5,7 @@ function Sidebar({ route, setRoute, collapsed }) {
     { id: 'dashboard', label: '工作台', icon: 'home' },
     { id: 'list', label: '备货计划', icon: 'list' },
     { id: 'sku', label: 'SKU 分析', icon: 'box' },
-    { id: 'arch', label: '信息架构', icon: 'info' },
+    { id: 'drafts', label: '采购草稿', icon: 'package' },
   ];
   return (
     <aside style={{
@@ -60,39 +60,75 @@ function Sidebar({ route, setRoute, collapsed }) {
         {!collapsed && (
           <>
             <div className="label" style={{ padding: '14px 8px 4px' }}>店铺空间</div>
-            {[
-              { name: 'Aurora-US01', risk: 4 },
-              { name: 'Aurora-DE02', risk: 3 },
-              { name: 'Nordic-UK01', risk: 1 },
-              { name: 'Sakura-JP01', risk: 0 },
-            ].map(s => (
-              <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, color: 'var(--text-2)', cursor: 'default', borderRadius: 6 }}>
+            {(window.STORES_DATA || []).slice(0, 6).map(s => (
+              <button
+                key={s.mallId}
+                onClick={() => setRoute({ page: 'list', filter: 'all', mallId: s.mallId, mallName: s.name })}
+                title={`查看 ${s.name} 的备货列表`}
+                style={{
+                  appearance: 'none', border: 0, background: 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 10px', fontSize: 12, color: 'var(--text-2)',
+                  cursor: 'pointer', borderRadius: 6, fontFamily: 'inherit', textAlign: 'left',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'var(--surface-hover)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
                 <Icon name="store" size={13}/>
-                <span style={{ flex: 1 }}>{s.name}</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
                 {s.risk > 0 && <span className="chip p1" style={{ height: 16, padding: '0 5px', fontSize: 10 }}>{s.risk}</span>}
-              </div>
+              </button>
             ))}
+            {(!window.STORES_DATA || window.STORES_DATA.length === 0) && (
+              <div style={{ padding: '6px 10px', fontSize: 11, color: 'var(--text-4)' }}>—</div>
+            )}
           </>
         )}
       </div>
 
       {!collapsed && (
         <div style={{ padding: 12, borderTop: '1px solid var(--border)', background: 'rgba(255,255,255,0.015)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--surface-3)', color: 'var(--text)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>李</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>李婧 · 运营组长</div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>aurora-prod / 上海</div>
-            </div>
-            <Icon name="settings" size={14} color="var(--text-3)"/>
-          </div>
+          {(() => {
+            const me = window.ME_DATA || { displayName: '—', roleLabel: '', workspace: '—', timezone: '' };
+            const initial = (me.displayName || '·').slice(0, 1);
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--surface-3)', color: 'var(--text)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>{initial}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {me.displayName}{me.roleLabel ? ` · ${me.roleLabel}` : ''}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>{me.workspace} / {me.timezone}</div>
+                </div>
+                <Icon name="settings" size={14} color="var(--text-3)"/>
+              </div>
+            );
+          })()}
         </div>
       )}
     </aside>
   );
 }
 
-function Topbar({ onAI, onRefresh, onToggleSidebar, asOf }) {
+function Topbar({ onAI, onRefresh, onToggleSidebar, asOf, conn = 'connecting', onSearch }) {
+  const connMeta = {
+    connecting: { color: 'var(--text-3)', label: '连接中…' },
+    online:     { color: 'var(--success)', label: '后端已连接' },
+    error:      { color: 'var(--p1)', label: '连接失败 · 点击重试' },
+  }[conn] || { color: 'var(--text-3)', label: conn };
+  const [q, setQ] = React.useState('');
+  const inputRef = React.useRef(null);
+
+  // ⌘K / Ctrl+K 全局聚焦搜索框
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [narrow, setNarrow] = React.useState(() => window.innerWidth < 760);
   React.useEffect(() => {
     const onResize = () => setNarrow(window.innerWidth < 760);
@@ -116,20 +152,30 @@ function Topbar({ onAI, onRefresh, onToggleSidebar, asOf }) {
         position: 'relative', flex: 1, maxWidth: 360,
       }}>
         <Icon name="search" size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }}/>
-        <input className="txt" placeholder="搜索 SKU、MSKU、ASIN、品名…" style={{ width: '100%', paddingLeft: 30, height: 32, fontSize: 12.5 }}/>
+        <input
+          ref={inputRef}
+          className="txt"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && q.trim()) { onSearch?.(q.trim()); setQ(''); }
+            if (e.key === 'Escape') setQ('');
+          }}
+          placeholder="搜索 SKU、MSKU、ASIN、品名…(Enter 跳列表)"
+          style={{ width: '100%', paddingLeft: 30, height: 32, fontSize: 12.5 }}/>
         <span className="kbd" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}>⌘K</span>
       </div>}
 
       <div style={{ flex: 1 }}/>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-3)' }}>
-        <span className="dot" style={{ background: 'var(--success)' }}/>
-        {!narrow && <>数据更新于 {fmt.dateLong(asOf)} {fmt.time(asOf)}</>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-3)' }} title={connMeta.label}>
+        <span className="dot" style={{ background: connMeta.color }}/>
+        {!narrow && <>{connMeta.label} · {fmt.dateLong(asOf)} {fmt.time(asOf)}</>}
         <button className="btn ghost icon sm" onClick={onRefresh} title="重新计算"><Icon name="refresh" size={13}/></button>
       </div>
 
       <button className={narrow ? 'btn icon sm' : 'btn'} onClick={onAI} style={{ gap: 6 }} title="AI 分析">
-        <Icon name="sparkles" size={13}/>
+        <Icon name="bot" size={14}/>
         {!narrow && <span>AI 分析</span>}
         {!narrow && <span className="kbd">⌘J</span>}
       </button>
