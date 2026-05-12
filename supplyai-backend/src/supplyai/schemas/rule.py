@@ -83,6 +83,7 @@ class ForecastRuleDTO(BaseModel):
     weight_30d: int
     denoise_enabled: bool
     abnormal_dates_json: list | dict | None
+    abnormal_sales_rule_json: dict | None = None  # {threshold: float, default: float}
     enabled_label: str | None = None  # UI 展示
 
 
@@ -115,4 +116,5 @@ class ForecastRuleUpsertRequest(BaseModel):
     weight_30d: int = 0
     denoise_enabled: bool = False
     abnormal_dates_json: list | dict | None = None
+    abnormal_sales_rule_json: dict | None = None  # {threshold: float, default: float}
     updated_by: str | None = None

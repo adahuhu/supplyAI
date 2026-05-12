@@ -216,18 +216,28 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 
       <FilterBar filter={filter} setFilter={setFilter} />
 
-      {/* Batch action bar */}
+      {/* Batch action bar — 与 header / 表格水平对齐;flex:none 不挤压表格 */}
       {selected.size > 0 &&
       <div className="fade-in" style={{
+        flex: 'none',
         display: 'flex', alignItems: 'center', gap: 10,
-        padding: '10px 32px',
+        margin: '0 32px 12px',
+        padding: '8px 12px',
         background: 'var(--accent-soft)',
-        borderBottom: '1px solid var(--border)'
+        border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+        borderRadius: 'var(--r)',
+        boxShadow: '0 2px 8px -2px color-mix(in srgb, var(--accent) 35%, transparent)',
       }}>
-          <span style={{ fontSize: 12.5, fontWeight: 500 }}>已选 {selected.size} 项</span>
+          <Icon name="check" size={13} color="var(--accent-text)"/>
+          <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--accent-text)' }}>已选 {selected.size} 项</span>
           <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>· 批量生成最多 50 条 · 批量特配最多 200 条</span>
           <div style={{ flex: 1 }} />
-          <button className="btn sm" onClick={() => openRules({ batch: true, count: selected.size })}>
+          <button className="btn sm" onClick={() => openRules({
+            batch: true,
+            count: selected.size,
+            // 把所选 SKU 详细信息传到 RulesModal,保存时遍历逐个 upsert
+            skus: Array.from(selected).map(id => SKUS.find(s => s.id === id)).filter(Boolean),
+          })}>
             <Icon name="settings" size={12} />批量规则设置
           </button>
           <button className="btn sm primary" onClick={() => openCreatePO(Array.from(selected))}>
@@ -239,13 +249,13 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <table className="t" style={{ minWidth: 1760 }}>
+        <table className="t" style={{ minWidth: 1680 }}>
           <thead>
             <tr>
-              <th style={{ width: 36, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 3 }}>
+              <th style={{ width: 36, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 3, boxShadow: '1px 0 0 var(--border)' }}>
                 <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleAll} />
               </th>
-              <th style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 3, minWidth: 280 }}>商品</th>
+              <th style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 3, minWidth: 280, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>商品</th>
               <th>店铺/国家</th>
               <th>状态</th>
               <th>风险</th>
@@ -262,7 +272,6 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
               <th>预计断货</th>
               <th>上次发货</th>
               <th>上次采购</th>
-              <th>预计到货</th>
               <th className="num">采购时效</th>
               <th>建议采购</th>
               <th className="num">建议采购量</th>
@@ -278,10 +287,10 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                 <tr key={s.id} className={sel ? 'selected' : ''}
                 style={{ cursor: 'pointer' }}
                 onClick={() => setRoute({ page: 'sku', skuId: s.id })}>
-                  <td style={{ position: 'sticky', left: 0, background: sel ? 'var(--accent-soft)' : 'var(--surface)', zIndex: 1 }} onClick={(e) => e.stopPropagation()}>
+                  <td style={{ position: 'sticky', left: 0, background: sel ? 'var(--accent-soft)' : 'var(--surface)', zIndex: 1, boxShadow: '1px 0 0 var(--border)' }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={sel} onChange={() => toggleOne(s.id)} />
                   </td>
-                  <td style={{ position: 'sticky', left: 36, background: sel ? 'var(--accent-soft)' : 'var(--surface)', zIndex: 1 }}>
+                  <td style={{ position: 'sticky', left: 36, background: sel ? 'var(--accent-soft)' : 'var(--surface)', zIndex: 1, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: 280 }}>
                       <ProductImage label={s.msku.slice(-3)} size={36} />
                       <div style={{ minWidth: 0 }}>
@@ -331,11 +340,6 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                   </td>
                   <td className="tabular muted" style={{ fontSize: 11.5 }}>
                     {s.lastPurchaseAt ? fmt.dateLong(s.lastPurchaseAt) : <span style={{ color: 'var(--text-4)' }}>—</span>}
-                  </td>
-                  <td className="tabular muted" style={{ fontSize: 11.5 }}>
-                    {s.estimatedArrivalAt
-                      ? <span style={{ color: 'var(--text-2)' }}>{fmt.dateLong(s.estimatedArrivalAt)}</span>
-                      : <span style={{ color: 'var(--text-4)' }}>—</span>}
                   </td>
                   <td className="num tabular muted">{s.purchaseLeadTime}d</td>
                   <td>

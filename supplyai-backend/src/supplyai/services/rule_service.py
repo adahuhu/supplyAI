@@ -124,6 +124,7 @@ def _to_forecast_dto(r: MkForecastRule) -> ForecastRuleDTO:
         weight_30d=r.weight_30d,
         denoise_enabled=bool(r.denoise_enabled),
         abnormal_dates_json=r.abnormal_dates_json,
+        abnormal_sales_rule_json=r.abnormal_sales_rule_json,
     )
 
 
@@ -191,6 +192,7 @@ class ForecastRuleService:
         rule.weight_30d = req.weight_30d
         rule.denoise_enabled = 1 if req.denoise_enabled else 0
         rule.abnormal_dates_json = req.abnormal_dates_json
+        rule.abnormal_sales_rule_json = req.abnormal_sales_rule_json
         rule.updated_by = req.updated_by
         await self._session.flush()
         return _to_forecast_dto(rule)

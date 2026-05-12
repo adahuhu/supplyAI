@@ -66,9 +66,9 @@
       fbaAvail, fbaInTransit, localActual, localPlan,
       localTotal: localActual + localPlan,
       totalStock: row.total_stock ?? 0,
-      sellable: row.sellable_days ?? 0,
-      fbaSellable: row.fba_sellable_days ?? 0,
-      localSellable: row.local_sellable_days ?? 0,
+      sellable: row.sellable_days != null ? +(+row.sellable_days).toFixed(2) : 0,
+      fbaSellable: row.fba_sellable_days != null ? +(+row.fba_sellable_days).toFixed(2) : 0,
+      localSellable: row.local_sellable_days != null ? +(+row.local_sellable_days).toFixed(2) : 0,
 
       // 时效 / 建议
       safeDays: row.safety_days ?? 14,

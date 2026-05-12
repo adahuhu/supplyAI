@@ -130,7 +130,7 @@ function SKUTrendPanel({ sku }) {
         <span style={{ flex: 1 }}/>
         {hasAdjustments && range.futDays > 0 && (
           <span style={{ color: adjustedAvg >= sku.futureDaily ? 'var(--p3-strong)' : 'var(--p2-strong)', fontWeight: 600 }}>
-            调整后均日销 {adjustedAvg} 件
+            调整后均日销 {(+adjustedAvg).toFixed(2)} 件
           </span>
         )}
       </div>
@@ -138,7 +138,7 @@ function SKUTrendPanel({ sku }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
         <KV k="近 7 天日销（原始）" v={sku.last7Daily}/>
         <KV k="近 7 天日销（去噪）" v={sku.last7Denoised}/>
-        <KV k="未来平均日销" v={hasAdjustments && range.futDays > 0 ? `${adjustedAvg} (调后)` : sku.futureDaily}/>
+        <KV k="未来平均日销" v={hasAdjustments && range.futDays > 0 ? `${(+adjustedAvg).toFixed(2)} (调后)` : (+sku.futureDaily).toFixed(2)}/>
         <KV k="未来 14 天合计" v={fmt.num(forecastValues.slice(0, 14).reduce((a, b) => a + b, 0))}/>
       </div>
     </div>
@@ -731,11 +731,15 @@ function TrendPanelV7({ sku }) {
           </span>
         )}
         <span style={{ flex: 1 }}/>
-        {hasAdj && !isLastYear && (
-          <span style={{ fontWeight: 600, color: adjAvg > sku.futureDaily ? 'var(--p3-strong)' : 'var(--p2)', fontSize: 11.5 }}>
-            调整后均日销 {adjAvg} 件（{adjAvg > sku.futureDaily ? '+' : ''}{adjAvg - sku.futureDaily}）
-          </span>
-        )}
+        {hasAdj && !isLastYear && (() => {
+          const diff = +(adjAvg - sku.futureDaily).toFixed(2);
+          const sign = diff > 0 ? '+' : '';
+          return (
+            <span style={{ fontWeight: 600, color: adjAvg > sku.futureDaily ? 'var(--p3-strong)' : 'var(--p2)', fontSize: 11.5 }}>
+              调整后均日销 {(+adjAvg).toFixed(2)} 件（{sign}{diff}）
+            </span>
+          );
+        })()}
       </div>
 
       <div style={{ height: 1, background: 'var(--border)', margin: '0 0 12px' }}/>
@@ -749,7 +753,7 @@ function TrendPanelV7({ sku }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
         <KV k="近 7 天日销（原始）" v={sku.last7Daily}/>
         <KV k="近 7 天日销（去噪）" v={sku.last7Denoised}/>
-        <KV k="未来平均日销" v={hasAdj && !isLastYear ? `${adjAvg} (调后)` : sku.futureDaily}/>
+        <KV k="未来平均日销" v={hasAdj && !isLastYear ? `${(+adjAvg).toFixed(2)} (调后)` : (+sku.futureDaily).toFixed(2)}/>
         <KV k="未来 14 天合计" v={fmt.num(forecast.slice(0, 14).reduce((sum, item) => sum + item.value, 0))}/>
       </div>
     </div>
@@ -1330,8 +1334,8 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
               <KV k="总库存" v={fmt.num(sku.totalStock)}/>
               <KV k="FBA 库存" v={fmt.num(sku.fbaAvail + sku.fbaInTransit)} hint="FBA 可用 + 在途"/>
               <KV k="本地库存" v={fmt.num(sku.localTotal)} hint="本地实际 + 本地预计"/>
-              <KV k="未来平均日销" v={sku.futureDaily}/>
-              <KV k="可售天数" v={sku.sellable + ' 天'} hint="总库存 ÷ 未来平均日销"/>
+              <KV k="未来平均日销" v={(+sku.futureDaily).toFixed(2)}/>
+              <KV k="可售天数" v={(+sku.sellable).toFixed(2) + ' 天'} hint="总库存 ÷ 未来平均日销"/>
               <KV k="采购时效" v={sku.purchaseLeadTime + ' 天'}/>
               <KV k="安全天数" v={sku.safeDays + ' 天'}/>
             </div>
@@ -1445,7 +1449,7 @@ function RiskCellWithExplain({ sku }) {
         {sku.priority.toUpperCase()} · {label}
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-        FBA 可售 {sku.fbaSellable} 天 · 阈值 P1 ≤ 7d
+        FBA 可售 {(+sku.fbaSellable).toFixed(2)} 天 · 阈值 P1 ≤ 7d
         <span style={{ color: 'var(--text-4)', marginLeft: 6 }}>查看计算</span>
       </div>
 
@@ -1472,11 +1476,11 @@ function RiskCellWithExplain({ sku }) {
             <span style={{ color: 'var(--text-4)', fontWeight: 400, marginLeft: 'auto' }}>基于 MSKU + 店铺</span>
           </div>
           <CalcRow k="覆盖周期" v={`${sku.purchaseLeadTime}d + ${sku.safeDays}d = ${sku.totalCoverage}d`}/>
-          <CalcRow k="覆盖需求" v={`${sku.totalCoverage}d × ${sku.futureDaily} = ${sku.coverageDemand} 件`}/>
+          <CalcRow k="覆盖需求" v={`${sku.totalCoverage}d × ${(+sku.futureDaily).toFixed(2)} = ${(+sku.coverageDemand).toFixed(2)} 件`}/>
           <CalcRow k="总库存" v={`${sku.totalStock} = FBA ${sku.fbaAvail + sku.fbaInTransit} + 本地 ${sku.localTotal}`}/>
           <CalcRow k="建议采购" v={`${sku.coverageDemand} − ${sku.totalStock} = ${fmt.num(sku.suggestQty)} 件`} highlight/>
-          <CalcRow k="风险判定" v={`FBA 可售 ${sku.fbaSellable}d → ${sku.priority.toUpperCase()}（仅 FBA 侧）`}/>
-          <CalcRow k="预计断货" v={`今天 + ${sku.fbaSellable}d = ${fmt.dateLong(sku.stockoutDate)}`}/>
+          <CalcRow k="风险判定" v={`FBA 可售 ${(+sku.fbaSellable).toFixed(2)}d → ${sku.priority.toUpperCase()}（仅 FBA 侧）`}/>
+          <CalcRow k="预计断货" v={`今天 + ${(+sku.fbaSellable).toFixed(2)}d = ${fmt.dateLong(sku.stockoutDate)}`}/>
           <CalcRow k="建议采购日" v={`断货 − ${sku.purchaseLeadTime}d = ${fmt.dateLong(sku.purchaseDate)}`} last/>
         </div>
       )}

@@ -26,6 +26,9 @@ function RulesModal({ open, onClose, ctx, showToast }) {
   const [weights, setWeights] = React.useState({ d3: 0, d7: 100, d15: 0, d30: 0 });
   const [excludeDates, setExcludeDates] = React.useState([{ from: '2026-04-15', to: '2026-04-21', reason: 'Prime Day 促销' }]);
   const [excludeAbnormal, setExcludeAbnormal] = React.useState(true);
+  // 异常销量阈值规则: 单日销量 > threshold 时,替换为 default
+  const [abnormalThreshold, setAbnormalThreshold] = React.useState('');
+  const [abnormalDefault, setAbnormalDefault] = React.useState('');
 
   if (!open) return null;
 
@@ -35,40 +38,62 @@ function RulesModal({ open, onClose, ctx, showToast }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const targetSku = ctx?.sku;
-      const scopeType = scope === 'global' ? 'global' : 'sku';
-      const baseScope = {
-        scope_type: scopeType,
-        mall_id: scopeType === 'global' ? null : (targetSku?.mall_id ?? null),
-        msku: scopeType === 'global' ? null : (targetSku?.msku ?? null),
-      };
-      // 1. 补货规则(始终上传)
-      if (window.api) {
-        await window.api.rulesUpsert({
-          ...baseScope,
-          safety_days: safeDays,
-          purchase_duration_days: purchaseDuration,
-          delivery_days: purchaseDelivery,
-          qc_days: qcDays,
-          enabled: true,
-          updated_by: 'frontend',
-        });
+      // 构造目标 SKU 列表:
+      //   - global:一次 upsert(scope=global, 不带 mall_id+msku)
+      //   - 单 SKU 进入:用 ctx.sku 的 mall_id+msku
+      //   - 批量进入:遍历 ctx.skus 每个调一次
+      const targets = scope === 'global'
+        ? [{ scope_type: 'global', mall_id: null, msku: null }]
+        : ctx?.batch && ctx.skus && ctx.skus.length
+          ? ctx.skus.map(s => ({ scope_type: 'sku', mall_id: s.mall_id ?? null, msku: s.msku ?? null }))
+          : ctx?.sku
+            ? [{ scope_type: 'sku', mall_id: ctx.sku.mall_id ?? null, msku: ctx.sku.msku ?? null }]
+            : null;
+
+      if (!targets || targets.length === 0) {
+        throw new Error('未识别到目标 SKU,请先从 SKU 行或列表勾选进入');
       }
-      // 2. 销量预测规则(forecast tab 配置)
+      // 校验:scope=sku 时 mall_id+msku 必须齐全(否则后端 422)
+      const missing = targets.find(t => t.scope_type === 'sku' && (!t.mall_id || !t.msku));
+      if (missing) {
+        throw new Error('选中 SKU 缺少 mall_id 或 msku,请刷新列表后重试');
+      }
+
+      // 1. 补货规则(批量遍历)
+      if (window.api) {
+        for (const t of targets) {
+          await window.api.rulesUpsert({
+            ...t,
+            safety_days: safeDays,
+            purchase_duration_days: purchaseDuration,
+            delivery_days: purchaseDelivery,
+            qc_days: qcDays,
+            enabled: true,
+            updated_by: 'frontend',
+          });
+        }
+      }
+      // 2. 销量预测规则
+      const abnRule = (abnormalThreshold && abnormalDefault)
+        ? { threshold: +abnormalThreshold, default: +abnormalDefault }
+        : null;
       if (window.api && window.api.forecastRulesUpsert) {
-        await window.api.forecastRulesUpsert({
-          ...baseScope,
-          forecast_mode: forecastMode,
-          fixed_daily_sales: forecastMode === 'fixed' && fixedDaily ? +fixedDaily : null,
-          default_daily_sales: forecastMode === 'default' ? +defaultDaily : null,
-          weight_3d: weights.d3,
-          weight_7d: weights.d7,
-          weight_15d: weights.d15,
-          weight_30d: weights.d30,
-          denoise_enabled: excludeAbnormal,
-          abnormal_dates_json: excludeDates.length ? excludeDates : null,
-          updated_by: 'frontend',
-        });
+        for (const t of targets) {
+          await window.api.forecastRulesUpsert({
+            ...t,
+            forecast_mode: forecastMode,
+            fixed_daily_sales: forecastMode === 'fixed' && fixedDaily ? +fixedDaily : null,
+            default_daily_sales: forecastMode === 'default' ? +defaultDaily : null,
+            weight_3d: weights.d3,
+            weight_7d: weights.d7,
+            weight_15d: weights.d15,
+            weight_30d: weights.d30,
+            denoise_enabled: !!abnRule,
+            abnormal_dates_json: excludeDates.length ? excludeDates : null,
+            abnormal_sales_rule_json: abnRule,
+            updated_by: 'frontend',
+          });
+        }
       }
       setSaving(false);
       setComputing(true);
@@ -77,7 +102,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
       }
       setComputing(false);
       onClose();
-      showToast('规则已保存,已重新计算' + (ctx?.batch ? ` ${ctx.count} 个 MSKU` : ''));
+      showToast('规则已保存,已重新计算' + (ctx?.batch ? ` · ${targets.length} 个 MSKU` : ''));
     } catch (err) {
       setSaving(false);
       setComputing(false);
@@ -194,7 +219,8 @@ function RulesModal({ open, onClose, ctx, showToast }) {
             defaultDaily={defaultDaily} setDefaultDaily={setDefaultDaily}
             weights={weights} setWeights={setWeights}
             excludeDates={excludeDates} setExcludeDates={setExcludeDates}
-            excludeAbnormal={excludeAbnormal} setExcludeAbnormal={setExcludeAbnormal}
+            abnormalThreshold={abnormalThreshold} setAbnormalThreshold={setAbnormalThreshold}
+            abnormalDefault={abnormalDefault} setAbnormalDefault={setAbnormalDefault}
             sku={ctx?.sku}
           />
         )}
@@ -314,7 +340,7 @@ function SummaryItem({ k, v, sub, highlight, mono }) {
   );
 }
 
-function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, setDefaultDaily, weights, setWeights, excludeDates, setExcludeDates, excludeAbnormal, setExcludeAbnormal, sku }) {
+function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, setDefaultDaily, weights, setWeights, excludeDates, setExcludeDates, abnormalThreshold, setAbnormalThreshold, abnormalDefault, setAbnormalDefault, sku }) {
   // Compute preview
   const sample = sku || SKUS[0] || { last7Denoised: 0, futureDaily: 0, msku: '—' };
   const last7 = sample.last7Denoised || 0;
@@ -339,15 +365,31 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
           <PreviewKV k="最终未来平均日销" v={finalDaily} highlight/>
           <PreviewKV k="预计断货时间" v={fmt.dateLong(new Date(Date.now() + stockoutDays * 86400000))}/>
           <PreviewKV k="建议采购量" v={fmt.num(Math.max(0, (sample.totalCoverage * finalDaily) - sample.totalStock)) + ' 件'} highlight/>
-          <PreviewKV k="样本天数" v="30 / 30 天"/>
         </div>
 
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r)', padding: 12 }}>
-          <div className="label" style={{ marginBottom: 8 }}>预测趋势图</div>
-          <ChartArea history={sample.histRaw} future={Array.from({ length: 14 }, () => finalDaily)} height={140}/>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div className="label">预测趋势图</div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>历史前 7 天 · 预测后 30 天</div>
+          </div>
+          {(() => {
+            // 历史段:优先 recent7(列表/详情都有);否则用 histRaw 末 7 天
+            const hist = (sample.recent7 && sample.recent7.length)
+              ? sample.recent7
+              : (sample.histRaw || []).slice(-7);
+            const future = Array.from({ length: 30 }, () => finalDaily);
+            if (hist.length === 0 && finalDaily === 0) {
+              return (
+                <div style={{ height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, color: 'var(--text-4)' }}>
+                  暂无可视化数据 — 请先选择 SKU
+                </div>
+              );
+            }
+            return <ChartArea history={hist} future={future} height={140}/>;
+          })()}
           <div style={{ display: 'flex', gap: 16, fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>
-            <span><span style={{ color: 'var(--accent)' }}>━</span> 历史</span>
-            <span><span style={{ color: 'var(--accent)' }}>┄</span> 预测</span>
+            <span><span style={{ color: 'var(--accent)' }}>━</span> 历史(近 7 天)</span>
+            <span><span style={{ color: 'var(--accent)' }}>┄</span> 预测(未来 30 天)</span>
           </div>
         </div>
 
@@ -376,11 +418,23 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
             <button className="btn ghost icon sm" onClick={() => setExcludeDates(excludeDates.filter((_, j) => j !== i))}><Icon name="x" size={11}/></button>
           </div>
         ))}
-        <FieldRow label="排除异常销量">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
-            <input type="checkbox" checked={excludeAbnormal} onChange={e => setExcludeAbnormal(e.target.checked)}/>
-            自动识别（3σ 离群）
-          </label>
+        <FieldRow label="排除异常销量" hint="单日销量超过阈值时,以默认值替代">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, flex: 1 }}>
+            <span style={{ color: 'var(--text-3)' }}>超过</span>
+            <input className="txt" type="number" min="0"
+              value={abnormalThreshold}
+              onChange={e => setAbnormalThreshold(e.target.value)}
+              placeholder="如 200"
+              style={{ width: 80, height: 26, fontSize: 12 }}/>
+            <span style={{ color: 'var(--text-3)' }}>件,</span>
+            <span style={{ color: 'var(--text-3)' }}>则默认为</span>
+            <input className="txt" type="number" min="0"
+              value={abnormalDefault}
+              onChange={e => setAbnormalDefault(e.target.value)}
+              placeholder="如 80"
+              style={{ width: 80, height: 26, fontSize: 12 }}/>
+            <span style={{ color: 'var(--text-3)' }}>件</span>
+          </div>
         </FieldRow>
 
         <div className="divider" style={{ margin: '14px 0' }}/>
@@ -580,7 +634,7 @@ function CreatePOModal({ open, onClose, ids, showToast, setRoute }) {
           <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onClose}>取消</button>
             <button className="btn primary" onClick={handleGo} disabled={valid.length === 0}>
-              <Icon name="arrow-right" size={13}/>生成 {valid.length} 条草稿,跳转
+              <Icon name="lightning" size={13}/>生成采购计划
             </button>
           </div>
         </>

@@ -110,11 +110,8 @@ function Sidebar({ route, setRoute, collapsed }) {
 }
 
 function Topbar({ onAI, onRefresh, onToggleSidebar, asOf, conn = 'connecting', onSearch }) {
-  const connMeta = {
-    connecting: { color: 'var(--text-3)', label: '连接中…' },
-    online:     { color: 'var(--success)', label: '后端已连接' },
-    error:      { color: 'var(--p1)', label: '连接失败 · 点击重试' },
-  }[conn] || { color: 'var(--text-3)', label: conn };
+  // 错误时仍显示红点 + 错误文案;正常 / 连接中不再露出"后端已连接"等提示。
+  const connError = conn === 'error';
   const [q, setQ] = React.useState('');
   const inputRef = React.useRef(null);
 
@@ -168,9 +165,14 @@ function Topbar({ onAI, onRefresh, onToggleSidebar, asOf, conn = 'connecting', o
 
       <div style={{ flex: 1 }}/>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-3)' }} title={connMeta.label}>
-        <span className="dot" style={{ background: connMeta.color }}/>
-        {!narrow && <>{connMeta.label} · {fmt.dateLong(asOf)} {fmt.time(asOf)}</>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--text-3)' }}>
+        {connError && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--p1)' }} title="连接失败 · 点击重试">
+            <span className="dot" style={{ background: 'var(--p1)' }}/>
+            {!narrow && '连接失败'}
+          </span>
+        )}
+        {!narrow && <span>{fmt.dateLong(asOf)} {fmt.time(asOf)}</span>}
         <button className="btn ghost icon sm" onClick={onRefresh} title="重新计算"><Icon name="refresh" size={13}/></button>
       </div>
 
