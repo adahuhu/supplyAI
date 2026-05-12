@@ -111,7 +111,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} width={920}>
+    <Modal open={open} onClose={onClose} width={1120}>
       <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <Icon name="settings" size={16}/>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -341,16 +341,39 @@ function SummaryItem({ k, v, sub, highlight, mono }) {
 }
 
 function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, setDefaultDaily, weights, setWeights, excludeDates, setExcludeDates, abnormalThreshold, setAbnormalThreshold, abnormalDefault, setAbnormalDefault, sku }) {
-  // Compute preview
+  // 预览数据样本
   const sample = sku || SKUS[0] || { last7Denoised: 0, futureDaily: 0, msku: '—' };
   const last7 = sample.last7Denoised || 0;
   const weightSum = weights.d3 + weights.d7 + weights.d15 + weights.d30;
   const dynamicDaily = weightSum === 0 ? null : Math.round(
     (last7 * weights.d7 + (last7 * 1.05) * weights.d3 + (last7 * 0.95) * weights.d15 + (last7 * 0.92) * weights.d30) / weightSum
   );
-  const finalDaily = mode === 'fixed' && fixedDaily
-    ? +fixedDaily
-    : (mode === 'dynamic' && dynamicDaily != null ? dynamicDaily : (mode === 'default' ? defaultDaily : sample.futureDaily));
+
+  // 左侧"最终未来平均日销"用独立 state,只在用户改具体配置项时更新,
+  // 切换 fixed/dynamic/default TAB 不触发重算(2026-05-12 review R-Q3)。
+  const [finalDaily, setFinalDaily] = React.useState(sample.futureDaily || 0);
+
+  // 用 ref 持续追踪最新 mode,避免 mode 进 effect 依赖数组
+  const modeRef = React.useRef(mode);
+  React.useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  // sku 变化(打开/切换不同 SKU)→ 重置基线
+  React.useEffect(() => {
+    setFinalDaily(sample.futureDaily || 0);
+  }, [sample.msku]);
+
+  // 用户改具体输入时按"当前 mode"重算 — 仅依赖输入,不依赖 mode
+  React.useEffect(() => {
+    const m = modeRef.current;
+    if (m === 'fixed') {
+      if (fixedDaily) setFinalDaily(+fixedDaily);
+    } else if (m === 'dynamic') {
+      if (dynamicDaily != null) setFinalDaily(dynamicDaily);
+    } else if (m === 'default') {
+      setFinalDaily(defaultDaily || 0);
+    }
+  }, [fixedDaily, defaultDaily, weights.d3, weights.d7, weights.d15, weights.d30, dynamicDaily]);
+
   const stockoutDays = Math.round((sample.fbaAvail + sample.fbaInTransit) / Math.max(1, finalDaily));
 
   return (
@@ -402,22 +425,65 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
       </div>
 
       {/* Right settings */}
-      <div style={{ width: 380, flex: 'none', padding: 18, overflow: 'auto' }}>
+      <div style={{ width: 460, flex: 'none', padding: 20, overflow: 'auto' }}>
         <div className="label" style={{ marginBottom: 8 }}>异常处理</div>
-        <FieldRow label="排除异常时间">
+        <FieldRow label="排除异常时间" hint="时间段内的销量会被剔除">
           <button className="btn sm" onClick={() => setExcludeDates([...excludeDates, { from: '', to: '', reason: '' }])}>
-            <Icon name="plus" size={11}/>添加
+            <Icon name="plus" size={11}/>添加时间段
           </button>
         </FieldRow>
-        {excludeDates.map((d, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', background: 'var(--surface-2)', borderRadius: 4, fontSize: 11.5, marginBottom: 4 }}>
-            <Icon name="alert" size={11} color="var(--p2)"/>
-            <span className="mono">{d.from} → {d.to}</span>
-            <span style={{ color: 'var(--text-3)' }}>· {d.reason}</span>
-            <span style={{ flex: 1 }}/>
-            <button className="btn ghost icon sm" onClick={() => setExcludeDates(excludeDates.filter((_, j) => j !== i))}><Icon name="x" size={11}/></button>
+        {excludeDates.length === 0 && (
+          <div style={{ fontSize: 11.5, color: 'var(--text-4)', padding: '6px 2px' }}>
+            暂无排除时间段,点上方"添加时间段"新增
           </div>
-        ))}
+        )}
+        {excludeDates.map((d, i) => {
+          const update = (patch) => setExcludeDates(
+            excludeDates.map((row, j) => (j === i ? { ...row, ...patch } : row))
+          );
+          return (
+            <div key={i} style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1.4fr auto',
+              gap: 6,
+              padding: '6px 8px',
+              background: 'var(--surface-2)',
+              borderRadius: 4,
+              marginBottom: 4,
+              alignItems: 'center',
+            }}>
+              <input
+                className="txt"
+                type="date"
+                value={d.from || ''}
+                onChange={e => update({ from: e.target.value })}
+                style={{ height: 28, fontSize: 11.5, padding: '0 6px' }}
+                title="开始日期"
+              />
+              <input
+                className="txt"
+                type="date"
+                value={d.to || ''}
+                onChange={e => update({ to: e.target.value })}
+                style={{ height: 28, fontSize: 11.5, padding: '0 6px' }}
+                title="结束日期"
+              />
+              <input
+                className="txt"
+                type="text"
+                value={d.reason || ''}
+                onChange={e => update({ reason: e.target.value })}
+                placeholder="原因(如 Prime Day)"
+                style={{ height: 28, fontSize: 11.5, padding: '0 8px' }}
+              />
+              <button
+                className="btn ghost icon sm"
+                onClick={() => setExcludeDates(excludeDates.filter((_, j) => j !== i))}
+                title="删除"
+              ><Icon name="x" size={11}/></button>
+            </div>
+          );
+        })}
         <FieldRow label="排除异常销量" hint="单日销量超过阈值时,以默认值替代">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, flex: 1 }}>
             <span style={{ color: 'var(--text-3)' }}>超过</span>

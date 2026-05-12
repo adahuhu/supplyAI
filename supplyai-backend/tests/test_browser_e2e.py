@@ -214,7 +214,7 @@ def test_b_us_2_1_list_renders_real_rows_from_backend(page: Page) -> None:
 
 
 def test_b_us_2_2_filter_p1_narrows_list_to_12(page: Page) -> None:
-    """B-US-2.2: 点 P1 筛选标签,列表收窄到 12 行(seed 12 个 P1).
+    """B-US-2.2: 点 P1 筛选标签,列表确实收窄到只剩 P1.
 
     As a  运营负责人
     I want 点风险筛选标签后,列表立刻收窄
@@ -223,14 +223,19 @@ def test_b_us_2_2_filter_p1_narrows_list_to_12(page: Page) -> None:
     _wait_for_online(page)
     page.get_by_role("button", name="备货计划").click()
     expect(page.locator("table tbody tr").first).to_be_visible(timeout=10_000)
+    all_count = page.locator("table tbody tr").count()
 
     # 点 "P1 紧急" 标签
     page.get_by_role("button", name=re.compile(r"P1.*紧急")).first.click()
 
-    # 等列表稳定后断言行数 = 12
+    # 等列表稳定后断言:必然变少 + 每行 priority chip 都是 P1
     page.wait_for_timeout(500)
     rows = page.locator("table tbody tr")
-    assert rows.count() == 12, f"P1 筛选后行数应 12,实得 {rows.count()}"
+    n = rows.count()
+    assert 1 <= n < all_count, f"P1 筛选后应收窄(实得 {n}/{all_count})"
+    # 全行只剩 P1 chip
+    p1_chip = page.locator("table tbody tr .chip", has_text=re.compile(r"P1"))
+    assert p1_chip.count() == n, f"P1 筛选后每行都应是 P1,实际 P1 chip={p1_chip.count()}/{n}"
 
 
 # ════════════════════════════════════════════════════════

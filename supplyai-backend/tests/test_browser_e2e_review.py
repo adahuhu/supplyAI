@@ -183,3 +183,54 @@ def test_q9_sku_detail_numbers_two_decimals(page: Page) -> None:
     assert not long_floats, f"Q9: 出现长 float 误差: {long_floats}"
     long_days = re.findall(r"\d+\.\d{3,}\s*天", body)
     assert not long_days, f"Q9: 天数超过 2 位小数: {long_days}"
+
+
+# ════════════════════════════════════════════════════════
+# 2026-05-12 v2 review — 3 new issues
+# ════════════════════════════════════════════════════════
+def test_rq1_rules_modal_wider(page: Page) -> None:
+    """R-Q1: 规则配置弹框加宽到至少 1080px."""
+    _wait_dashboard(page)
+    _goto_list(page)
+    _open_rules_no_ctx(page)
+    # Modal 的容器(react-renders <div onClick=stopPropagation 在 ui.jsx Modal>)
+    modal = page.locator("div.h2", has_text="规则设置").locator("xpath=ancestor::div[contains(@style, 'border-radius')][1]")
+    box = modal.bounding_box()
+    assert box is not None and box["width"] >= 1080, f"R-Q1: 弹框宽度应 ≥1080,当前 {box}"
+
+
+def test_rq2_exclude_date_inputs_editable(page: Page) -> None:
+    """R-Q2: 排除异常时间应可填写 date + reason."""
+    _wait_dashboard(page)
+    _goto_list(page)
+    _open_rules_no_ctx(page)
+    page.get_by_role("button", name="销量预测").click()
+    # 点添加 → 新行可见;或者已有种子行
+    page.get_by_role("button", name="添加时间段").click()
+    # 至少 2 个 type=date 输入
+    date_inputs = page.locator("input[type=date]")
+    assert date_inputs.count() >= 2, "R-Q2: 应至少有 2 个 date input"
+    # 第一个 date 应可写
+    first_date = date_inputs.first
+    first_date.fill("2026-06-01")
+    assert first_date.input_value() == "2026-06-01"
+    # reason input 占位"原因(如 Prime Day)"
+    expect(page.get_by_placeholder("原因(如 Prime Day)").first).to_be_visible()
+
+
+def test_rq3_tab_switch_does_not_change_final_daily(page: Page) -> None:
+    """R-Q3: 切换 fixed/dynamic/default tab 时,'最终未来平均日销' 不应变化."""
+    _wait_dashboard(page)
+    _goto_list(page)
+    _open_rules_no_ctx(page)
+    page.get_by_role("button", name="销量预测").click()
+    # 拿到"最终未来平均日销"的数值
+    kv = page.locator("text=最终未来平均日销").locator("xpath=following-sibling::*[1]")
+    expect(kv).to_be_visible(timeout=10_000)
+    initial = kv.inner_text().strip()
+    # 切换三个 mode 都不应改变
+    for label in ["固定日销量", "默认日销", "动态销量"]:
+        page.get_by_role("button", name=label).click()
+        page.wait_for_timeout(200)
+        cur = kv.inner_text().strip()
+        assert cur == initial, f"R-Q3: 切换到 {label} 后 finalDaily 变了:{initial} → {cur}"
