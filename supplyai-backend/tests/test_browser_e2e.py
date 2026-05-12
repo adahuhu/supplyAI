@@ -142,9 +142,13 @@ def page(page: Page) -> Page:
 
 
 def _wait_for_online(page: Page) -> None:
-    """等 Topbar 出现"后端已连接",证明 bootstrap fetch 成功."""
+    """等 Dashboard 主 hero "今日工作摘要" 出现,证明 bootstrap 完成、Dashboard 已 mount.
+
+    旧版用 Topbar "后端已连接" 文案做信号,但产品方已要求移除该状态文字(2026-05-12 review Q1),
+    改用 Dashboard 内必出现的稳定文案。
+    """
     page.goto(FRONTEND_URL)
-    expect(page.get_by_text("后端已连接")).to_be_visible(timeout=20_000)
+    expect(page.get_by_text("今日工作摘要")).to_be_visible(timeout=20_000)
 
 
 # ════════════════════════════════════════════════════════
@@ -152,18 +156,14 @@ def _wait_for_online(page: Page) -> None:
 # ════════════════════════════════════════════════════════
 
 
-def test_b_us_1_1_page_loads_and_topbar_shows_connected(page: Page) -> None:
-    """B-US-1.1: 打开 SupplyAI.html,Topbar 应该从 connecting 切到 online.
+def test_b_us_1_1_page_loads_and_dashboard_renders(page: Page) -> None:
+    """B-US-1.1: 打开 SupplyAI.html,等 Dashboard 渲染完(说明 bootstrap 拉真数据成功).
 
-    As a  最终用户
-    I want 打开页面后看见后端连通指示
-    So that 我知道今天能放心用,不会看到旧/假数据
+    Topbar 已不再露出"后端已连接"字样(2026-05-12 Q1),所以改用 Dashboard 内的稳定文案。
     """
     page.goto(FRONTEND_URL)
-    # 早期可能先看到"连接中…"
     expect(page.locator("body")).to_contain_text("SupplyAI", timeout=10_000)
-    # 最终切到"后端已连接"
-    expect(page.get_by_text("后端已连接")).to_be_visible(timeout=20_000)
+    expect(page.get_by_text("今日工作摘要")).to_be_visible(timeout=20_000)
 
 
 def test_b_us_1_2_sidebar_navigation_works(page: Page) -> None:
@@ -249,8 +249,8 @@ def test_b_us_3_1_click_row_navigates_to_detail(page: Page) -> None:
     page.get_by_role("button", name="备货计划").click()
     expect(page.locator("table tbody tr").first).to_be_visible(timeout=10_000)
 
-    # 点击第一行
-    page.locator("table tbody tr").first.click()
+    # 点击第一行的商品列(避开 sticky checkbox td 的 stopPropagation)
+    page.locator("table tbody tr").first.locator("td").nth(1).click()
 
     # 详情页关键标识(独立于具体行选了哪条):breadcrumb + MSKU 标签 + ASIN 标签
     expect(page.get_by_text("返回列表")).to_be_visible(timeout=10_000)
