@@ -140,7 +140,7 @@ supplyai-backend/
 ├── alembic.ini
 ├── Dockerfile                    # 仅生产用
 ├── docker-compose.yml            # 仅生产 staging:api + db + redis + celery
-├── .env.example                  # 含本地 / 生产两套配置示例
+├── env.example                   # 含本地 / 生产两套配置示例
 ├── data/                         # 本地 SQLite 文件存放(gitignored)
 │   └── supplyai.db
 ├── README.md

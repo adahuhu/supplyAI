@@ -77,7 +77,7 @@ supplyAI/
 │   └── api-smoke.html         # API 调试页
 │
 ├── supplyai-backend/          # 后端 — FastAPI + SQLAlchemy 2.0 async
-│   ├── .env.example           # ★ 所有配置项 + 注释(详见 supplyai-backend/README.md)
+│   ├── env.example            # ★ 所有配置项 + 注释(详见 supplyai-backend/README.md)
 │   ├── src/supplyai/          # 主代码(api/schemas/models/repositories/services/domain)
 │   ├── tests/                 # 216 in-process + 18 browser(Playwright)
 │   ├── alembic/               # 数据库迁移
@@ -114,13 +114,13 @@ uv sync                  # 装 fastapi / sqlalchemy / pydantic / aiosqlite / ope
 ### 3. 配置 .env
 
 ```bash
-cp .env.example .env
+cp env.example .env
 # 编辑 .env,至少填:
 #   SUPPLY_DASH_API_KEY=sk-xxxx        (DashScope API key)
 #   SUPPLY_DASH_URL=https://...        (默认走官方公网,自部署需填)
 ```
 
-> 完整配置项参考 [`supplyai-backend/.env.example`](supplyai-backend/.env.example)。
+> 完整配置项参考 [`supplyai-backend/env.example`](supplyai-backend/env.example)。
 > 也可以通过 shell 环境变量直接传(进程环境优先于 `.env`)。
 
 ### 4. 建库 + 灌演示数据

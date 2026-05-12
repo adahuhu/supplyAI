@@ -19,7 +19,7 @@ cd supplyai-backend
 uv sync
 
 # 3) 环境变量
-cp .env.example .env
+cp env.example .env
 # 编辑 .env,至少填上 SUPPLY_DASH_API_KEY=sk-...
 
 # 4) 建库 + 灌演示数据
@@ -69,10 +69,10 @@ curl -sN -X POST http://localhost:8000/api/supplyai/ai/chat/stream \
 所有配置通过 `supplyai/config.py` 的 `Settings`(`pydantic-settings`)集中管理:
 
 - **来源:** `.env` 文件 + 进程环境变量(进程优先)
-- **示例:** [`.env.example`](.env.example)(每一项都有注释)
+- **示例:** [`env.example`](env.example)(每一项都有注释)
 - **代码访问:** `from supplyai.config import settings; settings.dashscope_enable_thinking`
 
-关键配置(完整说明见 `.env.example`):
+关键配置(完整说明见 `env.example`):
 
 | Key | 默认 | 作用 |
 |---|---|---|
