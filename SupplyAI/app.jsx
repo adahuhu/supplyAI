@@ -11,7 +11,6 @@ function initialRouteFromUrl() {
   const page = params.get('page');
   if (page === 'sku') return { page: 'sku', skuId: params.get('skuId') || undefined };
   if (page === 'list') return { page: 'list', filter: params.get('filter') || 'all' };
-  if (page === 'arch') return { page: 'arch' };
   return { page: 'dashboard' };
 }
 
@@ -221,7 +220,6 @@ function App() {
                   aiMode={t.aiMode}
                 />}
                 {route.page === 'drafts' && <DraftsPage setRoute={setRoute} showToast={showToast} highlightDraftId={route.draftId}/>}
-                {route.page === 'arch' && <ArchPage setRoute={setRoute}/>}
               </ErrorBoundary>
             )}
           </div>
