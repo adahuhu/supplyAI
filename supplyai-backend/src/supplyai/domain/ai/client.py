@@ -1,7 +1,7 @@
 """AiClient Protocol — 隔离 mock / DashScope / 未来其它模型."""
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, AsyncIterator, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,20 @@ class ChatResponse(BaseModel):
     finish_reason: Literal["stop", "tool_calls", "length", "content_filter"] = "stop"
 
 
+class StreamDelta(BaseModel):
+    """流式响应增量片段.
+
+    一次 chat_stream 调用会 yield 多个 StreamDelta,直到 finish_reason 出现表示结束。
+    - content 段: text=<新增 token>, finish_reason=None
+    - 工具调用段(整段): tool_calls=[...], finish_reason='tool_calls'(终止)
+    - 文本完成段:      text='',         finish_reason='stop'(终止)
+    """
+
+    text: str = ""
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    finish_reason: str | None = None
+
+
 class AiClient(Protocol):
     """LLM 客户端抽象接口.
 
@@ -48,3 +62,11 @@ class AiClient(Protocol):
         max_tokens: int = 1024,
         temperature: float = 0.2,
     ) -> ChatResponse: ...
+
+    def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDef] | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[StreamDelta]: ...

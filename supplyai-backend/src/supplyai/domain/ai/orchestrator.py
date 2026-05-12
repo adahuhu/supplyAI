@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any, AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +27,15 @@ class OrchestratorOutput:
     content: str
     tool_iterations: int
     finish_reason: str
+
+
+# 流式事件类型
+# - tool_start: {"type":"tool_start","name":"...","arguments":{...}}
+# - tool_end:   {"type":"tool_end","name":"...","ok":bool,"summary":"..."}
+# - delta:      {"type":"delta","text":"..."}
+# - done:       {"type":"done","finish_reason":"stop","tool_iterations":N}
+# - error:      {"type":"error","message":"..."}
+StreamEvent = dict[str, Any]
 
 
 class AiOrchestrator:
@@ -140,3 +150,105 @@ class AiOrchestrator:
             tool_iterations=iterations,
             finish_reason="length",
         )
+
+    async def run_stream(
+        self, user_messages: list[ChatMessage]
+    ) -> AsyncIterator[StreamEvent]:
+        """流式调度.
+
+        策略:每轮先用非流式 chat() 判断要不要 tool;一旦 finish_reason='stop' 的轮次,
+        改用 chat_stream() 重发同样的消息,把 LLM 的文本回复以 delta 流式吐给客户端。
+        这样 tool 阶段保持简单,只在"最后一段产文" 段做真流式 — 收益最大,实现最小。
+
+        事件序列示例:
+            tool_start → tool_end → tool_start → tool_end → delta..delta → done
+        """
+        msgs: list[ChatMessage] = [
+            ChatMessage(role="system", content=self._system_prompt),
+        ]
+        ctx_msg = self._build_context_message()
+        if ctx_msg:
+            msgs.append(ChatMessage(role="system", content=ctx_msg))
+        msgs.extend(user_messages)
+        iterations = 0
+
+        for _ in range(self._max_iter):
+            resp = await self._ai.chat(messages=msgs, tools=self._tools)
+
+            if resp.finish_reason != "tool_calls" or not resp.tool_calls:
+                # 最终回复 — 切到流式重发,真增量吐给客户端
+                async for delta in self._ai.chat_stream(messages=msgs, tools=self._tools):
+                    if delta.text and not delta.finish_reason:
+                        yield {"type": "delta", "text": delta.text}
+                    if delta.finish_reason:
+                        # 兜底:流式实现不可用时,resp.content 至少能保证有内容
+                        yield {
+                            "type": "done",
+                            "finish_reason": delta.finish_reason or "stop",
+                            "tool_iterations": iterations,
+                        }
+                        return
+                # 没拿到任何 delta(client.chat_stream 没实现?)— 用 resp.content 兜底
+                if resp.content:
+                    yield {"type": "delta", "text": resp.content}
+                yield {
+                    "type": "done",
+                    "finish_reason": resp.finish_reason or "stop",
+                    "tool_iterations": iterations,
+                }
+                return
+
+            # 模型决定调工具 — 仍按 sync 路径
+            msgs.append(ChatMessage(role="assistant", content=resp.content or ""))
+            for tc in resp.tool_calls:
+                args = dict(tc.arguments or {})
+                args["tenant_id"] = self._tenant_id
+                yield {
+                    "type": "tool_start",
+                    "name": tc.name,
+                    "arguments": {k: v for k, v in args.items() if k != "tenant_id"},
+                }
+                ok = True
+                summary = ""
+                try:
+                    result = await execute_tool(tc.name, args, self._session)
+                    summary = _short_tool_summary(tc.name, result)
+                    msgs.append(ChatMessage(
+                        role="tool",
+                        content=json.dumps(result, ensure_ascii=False),
+                        tool_call_id=tc.id,
+                    ))
+                except Exception as e:  # noqa: BLE001
+                    ok = False
+                    summary = f"{e.__class__.__name__}: {e}"
+                    msgs.append(ChatMessage(
+                        role="tool",
+                        content=json.dumps({"error": summary}, ensure_ascii=False),
+                        tool_call_id=tc.id,
+                    ))
+                yield {"type": "tool_end", "name": tc.name, "ok": ok, "summary": summary}
+            iterations += 1
+
+        logger.warning("ai_orchestrator_stream_capped iterations=%d", iterations)
+        yield {
+            "type": "delta",
+            "text": "[已达工具调用上限,请简化提问]",
+        }
+        yield {
+            "type": "done",
+            "finish_reason": "length",
+            "tool_iterations": iterations,
+        }
+
+
+def _short_tool_summary(name: str, result: Any) -> str:
+    """把 tool 返回的 dict / list 压缩成一行人类可读摘要,用于流式 UI 展示."""
+    if isinstance(result, dict):
+        if "rows" in result and isinstance(result["rows"], list):
+            return f"返回 {len(result['rows'])} 条"
+        if "error" in result:
+            return f"失败:{result['error']}"
+        return f"返回 {len(result)} 字段"
+    if isinstance(result, list):
+        return f"返回 {len(result)} 条"
+    return "完成"

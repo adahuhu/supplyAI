@@ -7,13 +7,14 @@ DashScope 端点: https://dashscope.aliyuncs.com/compatible-mode/v1
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
 from supplyai.domain.ai.client import (
     ChatMessage,
     ChatResponse,
+    StreamDelta,
     ToolCall,
     ToolDef,
 )
@@ -86,6 +87,108 @@ class DashScopeClient:
                 await client.aclose()
 
         return self._parse_response(data)
+
+    async def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDef] | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[StreamDelta]:
+        """流式 chat — yield delta token,结尾 yield 一个 finish_reason 非空的 delta.
+
+        tool_calls 分支:Qwen 在 stream=true 下会按片段下发 tool_calls.function.arguments,
+        我们在内部累积成完整 JSON,只在 finish_reason='tool_calls' 时整体下发。
+        """
+        body: dict[str, Any] = {
+            "model": self._model,
+            "messages": [self._serialize_message(m) for m in messages],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
+            ]
+
+        owns_http = self._http is None
+        client = self._http or httpx.AsyncClient(
+            timeout=self._timeout,
+            verify=self._verify_ssl,
+        )
+
+        # 累积工具调用 — index → {id, name, args_buf}
+        tc_buf: dict[int, dict[str, Any]] = {}
+
+        try:
+            async with client.stream(
+                "POST",
+                f"{self._base_url}/chat/completions",
+                json=body,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    choice = (chunk.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    finish_reason = choice.get("finish_reason")
+
+                    # 内容增量
+                    text = delta.get("content") or ""
+
+                    # 工具调用累积(OpenAI 兼容协议:tool_calls 是数组,index 标识同一个调用)
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        buf = tc_buf.setdefault(idx, {"id": "", "name": "", "args_buf": ""})
+                        if tc.get("id"):
+                            buf["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            buf["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            buf["args_buf"] += fn["arguments"]
+
+                    if text and not finish_reason:
+                        yield StreamDelta(text=text)
+
+                    if finish_reason:
+                        # 结束:打包累积的 tool_calls(如有),返一个 final delta
+                        tool_calls: list[ToolCall] = []
+                        if tc_buf:
+                            for idx in sorted(tc_buf.keys()):
+                                buf = tc_buf[idx]
+                                tool_calls.append(ToolCall(
+                                    id=buf["id"] or f"call_{idx}",
+                                    name=buf["name"],
+                                    arguments=_parse_args(buf["args_buf"]),
+                                ))
+                        yield StreamDelta(
+                            text=text,
+                            tool_calls=tool_calls,
+                            finish_reason=finish_reason,
+                        )
+                        break
+        finally:
+            if owns_http:
+                await client.aclose()
 
     @staticmethod
     def _serialize_message(m: ChatMessage) -> dict[str, Any]:

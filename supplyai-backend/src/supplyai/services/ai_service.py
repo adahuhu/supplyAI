@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from typing import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -156,3 +157,45 @@ class AiService:
                 finish_reason="stop",
                 status="degraded",
             )
+
+    async def chat_stream(self, req: ChatRequest) -> AsyncIterator[dict]:
+        """流式 chat — yield orchestrator 事件 dict.
+
+        与非流式 chat() 一致的预处理(降级/上下文/历史截断),最终通过 orchestrator.run_stream
+        逐 event 输出。错误时 yield 一个 error 事件,再 yield done。
+        """
+        if not req.messages:
+            raise AiEmptyMessagesException()
+
+        max_turns = settings.ai_history_turns
+        history = req.messages[-max_turns:] if len(req.messages) > max_turns else req.messages
+        user_msgs = [ChatMessage(role=m.role, content=m.content) for m in history]
+
+        try:
+            if self._session is None:
+                # 无 session — 直接走 ai_client.chat_stream(单轮,不调工具)
+                msgs = [ChatMessage(role="system", content=SYSTEM_PROMPT), *user_msgs]
+                async for delta in self._ai.chat_stream(messages=msgs):
+                    if delta.text and not delta.finish_reason:
+                        yield {"type": "delta", "text": delta.text}
+                    if delta.finish_reason:
+                        yield {
+                            "type": "done",
+                            "finish_reason": delta.finish_reason,
+                            "tool_iterations": 0,
+                        }
+                        return
+                return
+
+            orch = AiOrchestrator(
+                self._ai,
+                session=self._session,
+                tenant_id=req.tenant_id,
+                context=req.context or None,
+            )
+            async for event in orch.run_stream(user_msgs):
+                yield event
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ai_chat_stream_degraded: %s", e)
+            yield {"type": "error", "message": str(e)}
+            yield {"type": "done", "finish_reason": "stop", "tool_iterations": 0}

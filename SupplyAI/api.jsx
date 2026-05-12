@@ -140,6 +140,55 @@
       if (context) body.context = context;
       return postJson('/ai/chat', body);
     },
+    /**
+     * 流式 AI 对话.
+     * @param {Array} messages
+     * @param {object|null} context
+     * @param {(event:object)=>void} onEvent — 每个 SSE 事件回调
+     *   事件类型:tool_start / tool_end / delta / done / error
+     * @returns {Promise<void>} 流结束时 resolve;网络错误 reject
+     */
+    async aiChatStream(messages, context, onEvent) {
+      const body = { tenant_id: TENANT_ID, messages };
+      if (context) body.context = context;
+      const resp = await fetch(BASE + '/ai/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        let detail = null;
+        try { detail = await resp.json(); } catch (_) { /* ignore */ }
+        const message = (detail && detail.detail && detail.detail.message) || `请求失败 ${resp.status}`;
+        throw new ApiError('HTTP_' + resp.status, message, { url: resp.url, status: resp.status });
+      }
+      if (!resp.body) {
+        throw new ApiError('no_body', '浏览器不支持 ReadableStream', {});
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // SSE 帧分隔:连续 \n\n;一次可能含多帧
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of frame.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            try {
+              const ev = JSON.parse(payload);
+              onEvent && onEvent(ev);
+            } catch (_) { /* 忽略 malformed frame */ }
+          }
+        }
+      }
+    },
     purchaseDraftCreate(items, opts = {}) {
       return postJson('/purchase/draft/create', {
         tenant_id: TENANT_ID,

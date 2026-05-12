@@ -5,7 +5,9 @@
 """
 from __future__ import annotations
 
-from supplyai.domain.ai.client import ChatMessage, ChatResponse, ToolDef
+from typing import AsyncIterator
+
+from supplyai.domain.ai.client import ChatMessage, ChatResponse, StreamDelta, ToolDef
 
 
 class StubAiClient:
@@ -41,3 +43,17 @@ class StubAiClient:
             content=f"[stub] 收到提问:{last_user[:60]}",
             finish_reason="stop",
         )
+
+    async def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDef] | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[StreamDelta]:
+        """流式 stub — 把 chat() 的同步回复切成 2 个 delta 模拟流式."""
+        resp = await self.chat(messages, tools, max_tokens, temperature)
+        full = resp.content or ""
+        mid = max(1, len(full) // 2)
+        yield StreamDelta(text=full[:mid])
+        yield StreamDelta(text=full[mid:], finish_reason="stop")

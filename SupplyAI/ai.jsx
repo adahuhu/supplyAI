@@ -172,6 +172,17 @@ function AIInput({ placeholder = '提问 SKU 风险、采购建议、规则影�
   );
 }
 
+// 工具名 → 中文标签(用于流式 thinking 占位)
+const TOOL_LABEL = {
+  query_skus: '查询 SKU 列表',
+  get_sku_detail: '查询 SKU 详情',
+  query_risk_queue: '查询风险队列',
+  generate_purchase_draft: '生成采购草稿',
+  query_dashboard_snapshot: '查询工作台快照',
+  query_finance: '查询财务',
+  query_holidays: '查询节假日',
+};
+
 // ── Global AI ───────────────────────────────
 // 7 个 AI 场景 — 按飞书产品文档需求。
 // 每个场景对应一类决策:单 SKU/优先级/活动/风险/方案/新品/管理层。
@@ -187,10 +198,11 @@ const GLOBAL_AI_QUESTIONS = [
 
 function GlobalAIPanel({ onClose, setRoute, dashFilters, history, setHistory, wide, onToggleWide }) {
   const [thinking, setThinking] = React.useState(false);
-  // 真正后端对话 — 自由文本走 /ai/chat,渲染纯文本气泡
+  const [toolStatus, setToolStatus] = React.useState(''); // 正在调用的 tool 名
   const sendToBackend = async (text) => {
     setHistory(h => [...h, { role: 'user', text }]);
     setThinking(true);
+    setToolStatus('');
     try {
       const msgs = [];
       for (const m of history) {
@@ -198,7 +210,6 @@ function GlobalAIPanel({ onClose, setRoute, dashFilters, history, setHistory, wi
         else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: m.text });
       }
       msgs.push({ role: 'user', content: text });
-      // 上下文:当前页 dashboard + 用户选的过滤
       const context = { current_page: 'dashboard' };
       if (dashFilters) {
         const filters = {};
@@ -207,12 +218,38 @@ function GlobalAIPanel({ onClose, setRoute, dashFilters, history, setHistory, wi
         if (dashFilters.owner) filters.owner = dashFilters.owner;
         if (Object.keys(filters).length) context.filters = filters;
       }
-      const resp = await window.api.aiChat(msgs, context);
-      setHistory(h => [...h, { role: 'ai', text: resp.content }]);
+      // 流式:先推一个空 ai bubble,每 delta 增量追加
+      setHistory(h => [...h, { role: 'ai', text: '', streaming: true }]);
+      const appendDelta = (delta) => {
+        setHistory(h => {
+          const next = h.slice();
+          const last = next[next.length - 1];
+          if (last && last.role === 'ai') {
+            next[next.length - 1] = { ...last, text: (last.text || '') + delta };
+          }
+          return next;
+        });
+      };
+      await window.api.aiChatStream(msgs, context, (ev) => {
+        if (ev.type === 'delta') appendDelta(ev.text || '');
+        else if (ev.type === 'tool_start') setToolStatus(TOOL_LABEL[ev.name] || ev.name);
+        else if (ev.type === 'tool_end') setToolStatus('');
+        else if (ev.type === 'error') appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
+        else if (ev.type === 'done') {
+          // 清掉 streaming 标记
+          setHistory(h => {
+            const next = h.slice();
+            const last = next[next.length - 1];
+            if (last && last.streaming) next[next.length - 1] = { ...last, streaming: false };
+            return next;
+          });
+        }
+      });
     } catch (err) {
       setHistory(h => [...h, { role: 'ai', text: '⚠️ 调用失败:' + err.message }]);
     } finally {
       setThinking(false);
+      setToolStatus('');
     }
   };
 
@@ -238,13 +275,20 @@ function GlobalAIPanel({ onClose, setRoute, dashFilters, history, setHistory, wi
               </AIBubble>
             )
         ))}
-        {thinking && (
-          <AIBubble role="ai">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 12 }}>
-              <span className="pulse">●</span>计算中…
-            </div>
-          </AIBubble>
-        )}
+        {thinking && (() => {
+          const last = history[history.length - 1];
+          const hasGrowing = last && last.role === 'ai' && last.text;
+          // 已经在 stream 内容时不再叠一个 placeholder bubble
+          if (hasGrowing && !toolStatus) return null;
+          return (
+            <AIBubble role="ai">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 12 }}>
+                <span className="pulse">●</span>
+                {toolStatus ? `正在调用工具:${toolStatus}…` : '计算中…'}
+              </div>
+            </AIBubble>
+          );
+        })()}
 
         <div style={{ marginTop: 16 }}>
           <div className="label" style={{ marginBottom: 8 }}>常用场景</div>
@@ -287,6 +331,7 @@ const skuQuestions = (sku) => [
 
 function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWide }) {
   const [thinking, setThinking] = React.useState(false);
+  const [toolStatus, setToolStatus] = React.useState('');
   // 挂载后调 /ai/explain — 仅在该 SKU 历史为空时(首次打开),已有历史就跳过
   React.useEffect(() => {
     if (!window.api || !sku.listingId) return;
@@ -306,6 +351,7 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
   const sendToBackend = async (text) => {
     setHistory(h => [...h, { role: 'user', text }]);
     setThinking(true);
+    setToolStatus('');
     try {
       const msgs = [];
       for (const m of history) {
@@ -313,7 +359,6 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
         else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: m.text });
       }
       msgs.push({ role: 'user', content: text });
-      // 上下文:当前 SKU 完整信息,Orchestrator 注入到 system prompt
       const context = {
         current_page: 'sku',
         sku: {
@@ -325,12 +370,36 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
           priority: sku.priority,
         },
       };
-      const resp = await window.api.aiChat(msgs, context);
-      setHistory(h => [...h, { role: 'ai', text: resp.content }]);
+      setHistory(h => [...h, { role: 'ai', text: '', streaming: true }]);
+      const appendDelta = (delta) => {
+        setHistory(h => {
+          const next = h.slice();
+          const last = next[next.length - 1];
+          if (last && last.role === 'ai') {
+            next[next.length - 1] = { ...last, text: (last.text || '') + delta };
+          }
+          return next;
+        });
+      };
+      await window.api.aiChatStream(msgs, context, (ev) => {
+        if (ev.type === 'delta') appendDelta(ev.text || '');
+        else if (ev.type === 'tool_start') setToolStatus(TOOL_LABEL[ev.name] || ev.name);
+        else if (ev.type === 'tool_end') setToolStatus('');
+        else if (ev.type === 'error') appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
+        else if (ev.type === 'done') {
+          setHistory(h => {
+            const next = h.slice();
+            const last = next[next.length - 1];
+            if (last && last.streaming) next[next.length - 1] = { ...last, streaming: false };
+            return next;
+          });
+        }
+      });
     } catch (err) {
       setHistory(h => [...h, { role: 'ai', text: '⚠️ 调用失败:' + err.message }]);
     } finally {
       setThinking(false);
+      setToolStatus('');
     }
   };
 
@@ -371,13 +440,19 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
               </AIBubble>
             )
         ))}
-        {thinking && (
-          <AIBubble role="ai">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 12 }}>
-              <span className="pulse">●</span>计算中…
-            </div>
-          </AIBubble>
-        )}
+        {thinking && (() => {
+          const last = history[history.length - 1];
+          const hasGrowing = last && last.role === 'ai' && last.text;
+          if (hasGrowing && !toolStatus) return null;
+          return (
+            <AIBubble role="ai">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 12 }}>
+                <span className="pulse">●</span>
+                {toolStatus ? `正在调用工具:${toolStatus}…` : '计算中…'}
+              </div>
+            </AIBubble>
+          );
+        })()}
 
         <div style={{ marginTop: 8 }}>
           <div className="label" style={{ marginBottom: 8 }}>常用问题</div>
