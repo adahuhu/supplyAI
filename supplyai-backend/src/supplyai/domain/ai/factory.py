@@ -30,6 +30,7 @@ def get_ai_client() -> AiClient:
         model=settings.ai_model,
         base_url=settings.dashscope_base_url,
         verify_ssl=settings.dashscope_verify_ssl,
+        enable_thinking=settings.dashscope_enable_thinking,
     )
 
 

@@ -33,6 +33,7 @@ class DashScopeClient:
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 60.0,
         verify_ssl: bool = True,
+        enable_thinking: bool = False,
     ) -> None:
         if not api_key:
             raise ValueError("DashScope api_key 未配置 (settings.dashscope_api_key)")
@@ -41,6 +42,7 @@ class DashScopeClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._verify_ssl = verify_ssl
+        self._enable_thinking = enable_thinking
         self._http = http_client  # 测试时可注入
 
     async def chat(
@@ -50,25 +52,7 @@ class DashScopeClient:
         max_tokens: int = 1024,
         temperature: float = 0.2,
     ) -> ChatResponse:
-        body: dict[str, Any] = {
-            "model": self._model,
-            "messages": [self._serialize_message(m) for m in messages],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        if tools:
-            body["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description,
-                        "parameters": t.parameters,
-                    },
-                }
-                for t in tools
-            ]
-
+        body = self._build_body(messages, tools, max_tokens, temperature, stream=False)
         owns_http = self._http is None
         client = self._http or httpx.AsyncClient(
             timeout=self._timeout,
@@ -88,25 +72,27 @@ class DashScopeClient:
 
         return self._parse_response(data)
 
-    async def chat_stream(
+    def _build_body(
         self,
         messages: list[ChatMessage],
-        tools: list[ToolDef] | None = None,
-        max_tokens: int = 1024,
-        temperature: float = 0.2,
-    ) -> AsyncIterator[StreamDelta]:
-        """流式 chat — yield delta token,结尾 yield 一个 finish_reason 非空的 delta.
-
-        tool_calls 分支:Qwen 在 stream=true 下会按片段下发 tool_calls.function.arguments,
-        我们在内部累积成完整 JSON,只在 finish_reason='tool_calls' 时整体下发。
-        """
+        tools: list[ToolDef] | None,
+        max_tokens: int,
+        temperature: float,
+        *,
+        stream: bool,
+    ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self._model,
             "messages": [self._serialize_message(m) for m in messages],
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "stream": True,
         }
+        if stream:
+            body["stream"] = True
+        # Qwen3.x 默认开启 reasoning_content;关掉以消除 30-60s 首字延迟。
+        # 通过 extra_body 透传:OpenAI 兼容协议本来没有这个字段,DashScope 自定义接受。
+        if not self._enable_thinking:
+            body["enable_thinking"] = False
         if tools:
             body["tools"] = [
                 {
@@ -119,6 +105,21 @@ class DashScopeClient:
                 }
                 for t in tools
             ]
+        return body
+
+    async def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        tools: list[ToolDef] | None = None,
+        max_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[StreamDelta]:
+        """流式 chat — yield delta token,结尾 yield 一个 finish_reason 非空的 delta.
+
+        tool_calls 分支:Qwen 在 stream=true 下会按片段下发 tool_calls.function.arguments,
+        我们在内部累积成完整 JSON,只在 finish_reason='tool_calls' 时整体下发。
+        """
+        body = self._build_body(messages, tools, max_tokens, temperature, stream=True)
 
         owns_http = self._http is None
         client = self._http or httpx.AsyncClient(

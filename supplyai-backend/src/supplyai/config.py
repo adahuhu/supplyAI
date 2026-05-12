@@ -74,6 +74,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SUPPLY_DASH_VERIFY_SSL", "dashscope_verify_ssl"),
     )
 
+    # Qwen3.x 默认开启 reasoning_content(thinking)链:模型先内部"思考"再出 content,
+    # 在 stream=true 下导致 30-60s 首字延迟。默认关掉,需要时可由 SUPPLY_DASH_ENABLE_THINKING=true 重开。
+    dashscope_enable_thinking: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SUPPLY_DASH_ENABLE_THINKING", "dashscope_enable_thinking"),
+    )
+
     # ===== 缓存 =====
     cache_backend: Literal["memory", "redis"] = "memory"
     cache_default_ttl: int = 60
