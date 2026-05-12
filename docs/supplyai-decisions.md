@@ -36,7 +36,7 @@
 | N-6 | `fba_reserved` 用途。 | `docs/supplyai-data-table-design.md` §4.7 | 仅展示，不参与 `total_stock` 和 `fba_sellable_days`。 |
 | N-7 | `risk_level` 全小写。 | `docs/supplyai-data-table-design.md` §4.7 | 存储 `p1` / `p2` / `p3` / `safe`，前端展示再映射。 |
 | DB-001~005 | 本地轻量启动决策（SQLite / 进程内 LRU / BackgroundTasks / Mock AI / 4 行配置切生产） | `docs/supplyai-backend-python.md` §1 / §2 / §3 / §4 / §11 / §12 / §16.0 / §17 / §20 | 本地与生产形态完整文档化，业务代码 0 修改即可平迁。 |
-| DB-006 | 业务 API 全 POST。 | `docs/supplyai-technical-plan.md` §7 | 前端和后端统一以 POST body 传筛选、主键、分页、状态查询参数。 |
+| DB-006 | 业务 API 全 POST。 | 前后端约定 | 前端和后端统一以 POST body 传筛选、主键、分页、状态查询参数。 |
 
 ## 3. 后续文档动作
 

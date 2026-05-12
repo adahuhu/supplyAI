@@ -7,7 +7,6 @@
 - [SupplyAI 数据表设计](./supplyai-data-table-design.md)
 - [SupplyAI 字段映射表 v2](./supplyai-field-mapping-v2.md)
 - [SupplyAI 决策日志](./supplyai-decisions.md)
-- [SupplyAI 前端数据层隔离技术方案](./supplyai-technical-plan.md)
 
 ## 1. 目标与约束
 
