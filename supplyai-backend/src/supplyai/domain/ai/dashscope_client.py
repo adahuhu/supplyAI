@@ -152,8 +152,9 @@ class DashScopeClient:
                     delta = choice.get("delta") or {}
                     finish_reason = choice.get("finish_reason")
 
-                    # 内容增量
+                    # 内容增量 + reasoning(thinking)增量
                     text = delta.get("content") or ""
+                    reasoning = delta.get("reasoning_content") or ""
 
                     # 工具调用累积(OpenAI 兼容协议:tool_calls 是数组,index 标识同一个调用)
                     for tc in delta.get("tool_calls") or []:
@@ -167,8 +168,9 @@ class DashScopeClient:
                         if fn.get("arguments"):
                             buf["args_buf"] += fn["arguments"]
 
-                    if text and not finish_reason:
-                        yield StreamDelta(text=text)
+                    # 一帧可能 reasoning 和 content 同时非空(切换点),都吐出来
+                    if not finish_reason and (text or reasoning):
+                        yield StreamDelta(text=text, reasoning_text=reasoning)
 
                     if finish_reason:
                         # 结束:打包累积的 tool_calls(如有),返一个 final delta
@@ -183,6 +185,7 @@ class DashScopeClient:
                                 ))
                         yield StreamDelta(
                             text=text,
+                            reasoning_text=reasoning,
                             tool_calls=tool_calls,
                             finish_reason=finish_reason,
                         )

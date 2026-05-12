@@ -38,12 +38,14 @@ class StreamDelta(BaseModel):
     """流式响应增量片段.
 
     一次 chat_stream 调用会 yield 多个 StreamDelta,直到 finish_reason 出现表示结束。
-    - content 段: text=<新增 token>, finish_reason=None
-    - 工具调用段(整段): tool_calls=[...], finish_reason='tool_calls'(终止)
-    - 文本完成段:      text='',         finish_reason='stop'(终止)
+    - reasoning 段: reasoning_text=<thinking token>, text="", finish_reason=None
+    - content   段: text=<答复 token>,               reasoning_text="", finish_reason=None
+    - 工具调用段:   tool_calls=[...], finish_reason='tool_calls'(终止)
+    - 文本完成段:   text='',          finish_reason='stop'(终止)
     """
 
     text: str = ""
+    reasoning_text: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
     finish_reason: str | None = None
 

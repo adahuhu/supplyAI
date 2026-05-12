@@ -74,10 +74,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SUPPLY_DASH_VERIFY_SSL", "dashscope_verify_ssl"),
     )
 
-    # Qwen3.x 默认开启 reasoning_content(thinking)链:模型先内部"思考"再出 content,
-    # 在 stream=true 下导致 30-60s 首字延迟。默认关掉,需要时可由 SUPPLY_DASH_ENABLE_THINKING=true 重开。
+    # Qwen3.x 的 reasoning_content(思维链)展示:默认开启,
+    # 前端会把 reasoning 在折叠面板里实时展示,延迟到首条 reasoning_delta(~0.5-1s)。
+    # 如需 cost/latency 优先,可 SUPPLY_DASH_ENABLE_THINKING=false 直接跳过思考阶段。
     dashscope_enable_thinking: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices("SUPPLY_DASH_ENABLE_THINKING", "dashscope_enable_thinking"),
     )
 

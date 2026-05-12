@@ -1,5 +1,66 @@
 // AI panels — global (Dashboard) and per-SKU (detail).
 
+// 思考折叠面板:流式期间默认展开看 AI 在想什么;思考完成后默认折叠,可手动展开。
+function ReasoningPanel({ text, active }) {
+  // active = true 时表示思考正在进行(还没有 content delta)
+  const [open, setOpen] = React.useState(true);
+  const wasActiveRef = React.useRef(active);
+  // 从 active=true → false 时(思考结束)自动折叠
+  React.useEffect(() => {
+    if (wasActiveRef.current && !active) setOpen(false);
+    wasActiveRef.current = active;
+  }, [active]);
+  if (!text) return null;
+  return (
+    <div style={{
+      marginBottom: 8,
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--r-md)',
+      background: 'var(--surface-2)',
+      overflow: 'hidden',
+    }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%', appearance: 'none', border: 0,
+          background: 'transparent', cursor: 'pointer',
+          padding: '8px 10px',
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontFamily: 'inherit', textAlign: 'left',
+          color: 'var(--text-2)', fontSize: 11.5,
+        }}
+        title={open ? '收起思考过程' : '展开思考过程'}
+      >
+        <Icon name={active ? 'sparkles' : 'check'} size={11}
+          color={active ? 'var(--accent)' : 'var(--text-3)'}/>
+        <span style={{ fontWeight: 500 }}>
+          {active ? '思考中…' : '已完成思考'}
+        </span>
+        <span style={{ color: 'var(--text-4)', fontSize: 10.5 }}>
+          · {text.length} 字
+        </span>
+        <span style={{ flex: 1 }}/>
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} color="var(--text-3)"/>
+      </button>
+      {open && (
+        <div style={{
+          padding: '8px 12px 10px',
+          borderTop: '1px solid var(--border)',
+          fontSize: 11.5,
+          color: 'var(--text-3)',
+          fontFamily: 'var(--font-mono)',
+          lineHeight: 1.55,
+          whiteSpace: 'pre-wrap',
+          maxHeight: 260,
+          overflow: 'auto',
+        }}>
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AIBubble({ role, children }) {
   if (role === 'user') {
     return (
@@ -218,25 +279,27 @@ function GlobalAIPanel({ onClose, setRoute, dashFilters, history, setHistory, wi
         if (dashFilters.owner) filters.owner = dashFilters.owner;
         if (Object.keys(filters).length) context.filters = filters;
       }
-      // 流式:先推一个空 ai bubble,每 delta 增量追加
-      setHistory(h => [...h, { role: 'ai', text: '', streaming: true }]);
-      const appendDelta = (delta) => {
+      // 流式:先推一个空 ai bubble,每 delta 增量追加;reasoning 走独立字段
+      setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
+      const append = (key) => (delta) => {
         setHistory(h => {
           const next = h.slice();
           const last = next[next.length - 1];
           if (last && last.role === 'ai') {
-            next[next.length - 1] = { ...last, text: (last.text || '') + delta };
+            next[next.length - 1] = { ...last, [key]: (last[key] || '') + delta };
           }
           return next;
         });
       };
+      const appendDelta = append('text');
+      const appendReasoning = append('reasoning');
       await window.api.aiChatStream(msgs, context, (ev) => {
         if (ev.type === 'delta') appendDelta(ev.text || '');
+        else if (ev.type === 'reasoning_delta') appendReasoning(ev.text || '');
         else if (ev.type === 'tool_start') setToolStatus(TOOL_LABEL[ev.name] || ev.name);
         else if (ev.type === 'tool_end') setToolStatus('');
         else if (ev.type === 'error') appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
         else if (ev.type === 'done') {
-          // 清掉 streaming 标记
           setHistory(h => {
             const next = h.slice();
             const last = next[next.length - 1];
@@ -270,15 +333,23 @@ function GlobalAIPanel({ onClose, setRoute, dashFilters, history, setHistory, wi
             : (
               <AIBubble key={i} role="ai">
                 {m.q && <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>{m.q}</div>}
-                <div style={{ fontSize: 12.5, lineHeight: 1.55 }}
-                  dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                {m.reasoning && (
+                  <ReasoningPanel
+                    text={m.reasoning}
+                    active={!!m.streaming && !m.text}
+                  />
+                )}
+                {m.text && (
+                  <div style={{ fontSize: 12.5, lineHeight: 1.55 }}
+                    dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                )}
               </AIBubble>
             )
         ))}
         {thinking && (() => {
           const last = history[history.length - 1];
-          const hasGrowing = last && last.role === 'ai' && last.text;
-          // 已经在 stream 内容时不再叠一个 placeholder bubble
+          const hasGrowing = last && last.role === 'ai' && (last.text || last.reasoning);
+          // 已经在 stream(content 或 reasoning)时不再叠 placeholder
           if (hasGrowing && !toolStatus) return null;
           return (
             <AIBubble role="ai">
@@ -339,21 +410,24 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
     let cancelled = false;
     setThinking(true);
     // 先 push 一个空 AI bubble,流式 delta 累积进它
-    setHistory(h => [...h, { role: 'ai', text: '', q: 'AI 解释', streaming: true }]);
-    const append = (delta) => {
+    setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', q: 'AI 解释', streaming: true }]);
+    const appendKey = (key) => (delta) => {
       if (cancelled) return;
       setHistory(h => {
         const next = h.slice();
         const last = next[next.length - 1];
         if (last && last.role === 'ai') {
-          next[next.length - 1] = { ...last, text: (last.text || '') + delta };
+          next[next.length - 1] = { ...last, [key]: (last[key] || '') + delta };
         }
         return next;
       });
     };
+    const append = appendKey('text');
+    const appendReasoning = appendKey('reasoning');
     window.api.aiExplainStream(sku.listingId, (ev) => {
       if (cancelled) return;
       if (ev.type === 'delta') append(ev.text || '');
+      else if (ev.type === 'reasoning_delta') appendReasoning(ev.text || '');
       else if (ev.type === 'error') append('\n⚠️ ' + (ev.message || '获取失败'));
       else if (ev.type === 'done') {
         setHistory(h => {
@@ -392,19 +466,22 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
           priority: sku.priority,
         },
       };
-      setHistory(h => [...h, { role: 'ai', text: '', streaming: true }]);
-      const appendDelta = (delta) => {
+      setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
+      const append = (key) => (delta) => {
         setHistory(h => {
           const next = h.slice();
           const last = next[next.length - 1];
           if (last && last.role === 'ai') {
-            next[next.length - 1] = { ...last, text: (last.text || '') + delta };
+            next[next.length - 1] = { ...last, [key]: (last[key] || '') + delta };
           }
           return next;
         });
       };
+      const appendDelta = append('text');
+      const appendReasoning = append('reasoning');
       await window.api.aiChatStream(msgs, context, (ev) => {
         if (ev.type === 'delta') appendDelta(ev.text || '');
+        else if (ev.type === 'reasoning_delta') appendReasoning(ev.text || '');
         else if (ev.type === 'tool_start') setToolStatus(TOOL_LABEL[ev.name] || ev.name);
         else if (ev.type === 'tool_end') setToolStatus('');
         else if (ev.type === 'error') appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
@@ -457,14 +534,22 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
             : (
               <AIBubble key={i} role="ai">
                 {m.q && <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>{m.q}</div>}
-                <div style={{ fontSize: 12.5, lineHeight: 1.55 }}
-                  dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                {m.reasoning && (
+                  <ReasoningPanel
+                    text={m.reasoning}
+                    active={!!m.streaming && !m.text}
+                  />
+                )}
+                {m.text && (
+                  <div style={{ fontSize: 12.5, lineHeight: 1.55 }}
+                    dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                )}
               </AIBubble>
             )
         ))}
         {thinking && (() => {
           const last = history[history.length - 1];
-          const hasGrowing = last && last.role === 'ai' && last.text;
+          const hasGrowing = last && last.role === 'ai' && (last.text || last.reasoning);
           if (hasGrowing && !toolStatus) return null;
           return (
             <AIBubble role="ai">

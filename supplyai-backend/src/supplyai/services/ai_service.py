@@ -139,10 +139,17 @@ class AiService:
                 ChatMessage(role="user", content=prompt),
             ]
             async for delta in self._ai.chat_stream(messages=msgs):
+                if delta.reasoning_text and not delta.finish_reason:
+                    got_any = True
+                    yield {"type": "reasoning_delta", "text": delta.reasoning_text}
                 if delta.text and not delta.finish_reason:
                     got_any = True
                     yield {"type": "delta", "text": delta.text}
                 if delta.finish_reason:
+                    if delta.reasoning_text:
+                        yield {"type": "reasoning_delta", "text": delta.reasoning_text}
+                    if delta.text:
+                        yield {"type": "delta", "text": delta.text}
                     status = classify_status(ctx, ai_available=True)
                     yield {
                         "type": "done",
@@ -220,6 +227,8 @@ class AiService:
                 # 无 session — 直接走 ai_client.chat_stream(单轮,不调工具)
                 msgs = [ChatMessage(role="system", content=SYSTEM_PROMPT), *user_msgs]
                 async for delta in self._ai.chat_stream(messages=msgs):
+                    if delta.reasoning_text and not delta.finish_reason:
+                        yield {"type": "reasoning_delta", "text": delta.reasoning_text}
                     if delta.text and not delta.finish_reason:
                         yield {"type": "delta", "text": delta.text}
                     if delta.finish_reason:

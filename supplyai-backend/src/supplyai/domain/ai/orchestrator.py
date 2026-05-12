@@ -182,20 +182,22 @@ class AiOrchestrator:
             finish_reason = "stop"
 
             async for delta in self._ai.chat_stream(messages=msgs, tools=self._tools):
+                # reasoning(思维链)增量 — 不入 assistant 历史,只透给客户端展示
+                if delta.reasoning_text and not delta.finish_reason:
+                    yield {"type": "reasoning_delta", "text": delta.reasoning_text}
                 # 文本增量 — 实时透给客户端,同时累积进 assistant 上下文
                 if delta.text:
                     accumulated_text += delta.text
-                    # 只对未结束的纯文本帧发 delta 事件;结束帧的 text 也算 delta
                     if not delta.finish_reason:
                         yield {"type": "delta", "text": delta.text}
                 if delta.finish_reason:
-                    # 结束帧 — 携带累积的 tool_calls(若有)
                     finish_reason = delta.finish_reason
                     if delta.tool_calls:
                         tool_calls = list(delta.tool_calls)
-                    # 结束帧里若还带了未发的 text 增量(罕见),补发
                     if delta.text and finish_reason != "tool_calls":
                         yield {"type": "delta", "text": delta.text}
+                    if delta.reasoning_text:
+                        yield {"type": "reasoning_delta", "text": delta.reasoning_text}
                     break
 
             if finish_reason != "tool_calls" or not tool_calls:
