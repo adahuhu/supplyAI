@@ -72,6 +72,33 @@ async def test_ai_chat_stream_done_has_finish_reason():
 
 
 @pytest.mark.asyncio
+async def test_ai_explain_stream_emits_meta_delta_done():
+    """/ai/explain/stream:首帧 meta(SKU 上下文),后续 delta,结束 done."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        async with ac.stream(
+            "POST",
+            "/api/supplyai/ai/explain/stream",
+            json={"tenant_id": 100228, "listing_id": 1000003},
+        ) as resp:
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            chunks = [c async for c in resp.aiter_bytes()]
+
+    events = _parse_sse(b"".join(chunks))
+    types = [e["type"] for e in events]
+    assert types[0] == "meta", f"首帧应该是 meta,实际 {types[:3]}"
+    assert "done" in types
+    meta = events[0]
+    assert "context" in meta and "model" in meta
+    assert "msku" in meta["context"]
+
+    delta_events = [e for e in events if e["type"] == "delta"]
+    assert delta_events, "应至少有 1 个 delta"
+    full = "".join(e["text"] for e in delta_events)
+    assert full, "delta 文本非空"
+
+
+@pytest.mark.asyncio
 async def test_ai_chat_stream_empty_messages_returns_error():
     """空 messages 应返 400(同非流式行为一致)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

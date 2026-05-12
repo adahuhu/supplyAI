@@ -338,12 +338,34 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
     if (history && history.length > 0) return; // 已有对话,不重复 explain
     let cancelled = false;
     setThinking(true);
-    window.api.aiExplain(sku.listingId).then(resp => {
+    // 先 push 一个空 AI bubble,流式 delta 累积进它
+    setHistory(h => [...h, { role: 'ai', text: '', q: 'AI 解释', streaming: true }]);
+    const append = (delta) => {
       if (cancelled) return;
-      setHistory(h => [...h, { role: 'ai', text: resp.explanation, q: 'AI 解释' }]);
+      setHistory(h => {
+        const next = h.slice();
+        const last = next[next.length - 1];
+        if (last && last.role === 'ai') {
+          next[next.length - 1] = { ...last, text: (last.text || '') + delta };
+        }
+        return next;
+      });
+    };
+    window.api.aiExplainStream(sku.listingId, (ev) => {
+      if (cancelled) return;
+      if (ev.type === 'delta') append(ev.text || '');
+      else if (ev.type === 'error') append('\n⚠️ ' + (ev.message || '获取失败'));
+      else if (ev.type === 'done') {
+        setHistory(h => {
+          const next = h.slice();
+          const last = next[next.length - 1];
+          if (last && last.streaming) next[next.length - 1] = { ...last, streaming: false };
+          return next;
+        });
+      }
     }).catch(err => {
       if (cancelled) return;
-      setHistory(h => [...h, { role: 'ai', text: '⚠️ 解释获取失败:' + err.message, q: 'AI 解释' }]);
+      append('\n⚠️ 解释获取失败:' + err.message);
     }).finally(() => { if (!cancelled) setThinking(false); });
     return () => { cancelled = true; };
   }, [sku.listingId]);

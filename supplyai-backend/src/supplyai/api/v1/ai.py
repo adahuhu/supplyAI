@@ -37,8 +37,36 @@ async def explain_sku(
     req: ExplainRequest,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> ExplainResponse:
-    """对单 SKU 给出风险/建议的中文解释."""
+    """对单 SKU 给出风险/建议的中文解释(一次性,兼容旧调用)."""
     return await _build_service(session).explain(req)
+
+
+@router.post("/explain/stream")
+async def explain_sku_stream(
+    req: ExplainRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+):
+    """SKU 解释 — SSE 流式版本.
+
+    事件序列:meta(SKU 上下文) → delta×N → done.
+    """
+    svc = _build_service(session)
+
+    async def event_gen():
+        try:
+            async for event in svc.explain_stream(req):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                pass
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/chat", response_model=ChatResponseMessage)
