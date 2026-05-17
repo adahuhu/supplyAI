@@ -11,6 +11,7 @@ from supplyai.models.mk import (
     MkPurchaseDraft,
     MkSkuForecastDaily,
     MkSkuInboundDetail,
+    MkStockoutEvent,
     MkSupplySkuDailyStat,
 )
 from supplyai.models.rl import RlAmzSalesDailyReport, RlFbaShipmentItem, RlMall
@@ -37,6 +38,7 @@ class SkuRepository:
         page_size: int = 50,
         sort_by: str = "priority",
         sort_desc: bool = False,
+        stockout_since: datetime | None = None,
     ) -> tuple[list[tuple], int]:
         """查询 SKU 列表 + 总数(返回 (rows, total))."""
         stat = MkSupplySkuDailyStat
@@ -62,8 +64,17 @@ class SkuRepository:
             )
         if suggest_only:
             base_filters.append(stat.suggest_purchase == 1)
-        if stockout_within_days is not None:
-            base_filters.append(stat.fba_sellable_days <= stockout_within_days)
+        if stockout_within_days is not None and stockout_since is not None:
+            base_filters.append(
+                select(MkStockoutEvent.event_id)
+                .where(
+                    MkStockoutEvent.tenant_id == stat.tenant_id,
+                    MkStockoutEvent.mall_id == stat.mall_id,
+                    MkStockoutEvent.msku == stat.msku,
+                    MkStockoutEvent.start_at >= stockout_since,
+                )
+                .exists()
+            )
 
         # 总数
         total_query = select(func.count(stat.id)).where(*base_filters)
@@ -91,6 +102,35 @@ class SkuRepository:
         result = await self._session.execute(query)
         rows = result.all()
         return list(rows), int(total)
+
+    async def stockout_recent_map(
+        self,
+        *,
+        tenant_id: int,
+        msku_mall_pairs: list[tuple[str | None, int | None]],
+        since: datetime,
+    ) -> dict[tuple[str | None, int | None], bool]:
+        """近 7 天实际 FBA 断货事件映射.
+
+        口径:只看事件开始时间是否落在近 7 天窗口内,排除更早已经断货的历史事件。
+        """
+        if not msku_mall_pairs:
+            return {}
+        event = MkStockoutEvent
+        pair_filters = [
+            (event.msku == msku) & (event.mall_id == mall_id)
+            for msku, mall_id in msku_mall_pairs
+        ]
+        result = await self._session.execute(
+            select(event.msku, event.mall_id)
+            .where(
+                event.tenant_id == tenant_id,
+                event.start_at >= since,
+                or_(*pair_filters),
+            )
+            .group_by(event.msku, event.mall_id)
+        )
+        return {(msku, mall_id): True for msku, mall_id in result.all()}
 
     def _sort_columns(self, sort_by: str, sort_desc: bool):
         stat = MkSupplySkuDailyStat

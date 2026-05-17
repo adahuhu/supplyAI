@@ -31,6 +31,7 @@ function Icon({ name, size = 14, stroke = 1.6, color = 'currentColor', style }) 
     case 'package': return <svg {...common}><path d="M16 16V8a4 4 0 0 0-8 0v8"/><rect x="2" y="9" width="20" height="13" rx="2"/></svg>;
     case 'users': return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
     case 'sun': return <svg {...common}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>;
+    case 'calendar': return <svg {...common}><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>;
     case 'moon': return <svg {...common}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>;
     case 'menu': return <svg {...common}><path d="M3 12h18M3 6h18M3 18h18"/></svg>;
     case 'more': return <svg {...common}><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>;
@@ -301,6 +302,150 @@ function Toast({ msg, kind = 'info' }) {
     }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }}/>
       {msg}
+    </div>
+  );
+}
+
+// ── DatePicker ──────────────────────────
+function datePickerParse(value) {
+  if (!value) return null;
+  const parts = String(value).split('-').map(Number);
+  if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) return null;
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function datePickerFormat(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function DatePicker({ value, onChange, placeholder = '选择日期', title, testId, style, disabled = false }) {
+  const selected = datePickerParse(value);
+  const baseMonth = selected || new Date();
+  const [open, setOpen] = React.useState(false);
+  const [month, setMonth] = React.useState(() => new Date(baseMonth.getFullYear(), baseMonth.getMonth(), 1));
+
+  React.useEffect(() => {
+    if (selected) setMonth(new Date(selected.getFullYear(), selected.getMonth(), 1));
+  }, [value]);
+
+  const start = new Date(month.getFullYear(), month.getMonth(), 1);
+  const offset = start.getDay();
+  const cells = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(month.getFullYear(), month.getMonth(), i - offset + 1);
+    return d;
+  });
+  const todayYmd = datePickerFormat(new Date());
+  const selectedYmd = selected ? datePickerFormat(selected) : '';
+
+  const setMonthOffset = (n) => {
+    setMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + n, 1));
+  };
+
+  const choose = (d) => {
+    onChange?.(datePickerFormat(d));
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position: 'relative', ...style }}>
+      <button
+        type="button"
+        data-testid={testId}
+        disabled={disabled}
+        title={title}
+        className="txt"
+        onClick={() => !disabled && setOpen(true)}
+        style={{
+          width: '100%',
+          minWidth: 0,
+          height: 32,
+          padding: '0 8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          color: value ? 'var(--text)' : 'var(--text-4)',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          textAlign: 'left',
+          fontSize: 12,
+          fontFamily: 'var(--font-mono)',
+          background: 'var(--surface)',
+        }}>
+        <Icon name="calendar" size={12}/>
+        <span style={{ flex: 1 }}>{value || placeholder}</span>
+        {value && (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange?.('');
+            }}
+            style={{ color: 'var(--text-4)', fontFamily: 'var(--font-sans)', fontSize: 13 }}>
+            ×
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 420 }}/>
+          <div
+            onClick={e => e.stopPropagation()}
+            className="fade-in"
+            style={{
+              position: 'absolute',
+              top: 36,
+              left: 0,
+              zIndex: 421,
+              width: 248,
+              padding: 10,
+              background: 'var(--surface)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--r-md)',
+              boxShadow: 'var(--sh-pop)',
+              fontFamily: 'var(--font-sans)',
+            }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <button className="btn ghost icon sm" type="button" onClick={() => setMonthOffset(-1)}><Icon name="chevron-left" size={13}/></button>
+              <div className="tabular" style={{ fontSize: 12.5, fontWeight: 600 }}>
+                {month.getFullYear()} 年 {month.getMonth() + 1} 月
+              </div>
+              <button className="btn ghost icon sm" type="button" onClick={() => setMonthOffset(1)}><Icon name="chevron-right" size={13}/></button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, marginBottom: 4 }}>
+              {['日','一','二','三','四','五','六'].map(w => (
+                <div key={w} style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--text-4)', padding: '3px 0' }}>{w}</div>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
+              {cells.map((d) => {
+                const ymd = datePickerFormat(d);
+                const inMonth = d.getMonth() === month.getMonth();
+                const isSelected = selectedYmd === ymd;
+                const isToday = todayYmd === ymd;
+                return (
+                  <button
+                    key={ymd}
+                    type="button"
+                    onClick={() => choose(d)}
+                    className="tabular"
+                    style={{
+                      height: 28,
+                      border: `1px solid ${isSelected ? 'var(--accent)' : isToday ? 'var(--border-strong)' : 'transparent'}`,
+                      borderRadius: 6,
+                      background: isSelected ? 'var(--accent-soft)' : 'transparent',
+                      color: isSelected ? 'var(--accent-text)' : inMonth ? 'var(--text)' : 'var(--text-4)',
+                      cursor: 'pointer',
+                      fontSize: 11.5,
+                      fontWeight: isSelected ? 700 : 500,
+                    }}>
+                    {d.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

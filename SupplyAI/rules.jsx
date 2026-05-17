@@ -111,7 +111,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} width={1120}>
+    <Modal open={open} onClose={onClose} width={1360}>
       <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <Icon name="settings" size={16}/>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -201,7 +201,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 460, maxHeight: 580 }}>
+      <div style={{ flex: 1, display: 'flex', minHeight: 600, maxHeight: 'calc(100vh - 220px)' }}>
         {tab === 'replenish' ? (
           <ReplenishTab
             safeDays={safeDays} setSafeDays={setSafeDays}
@@ -344,9 +344,23 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
   // 预览数据样本
   const sample = sku || SKUS[0] || { last7Denoised: 0, futureDaily: 0, msku: '—' };
   const last7 = sample.last7Denoised || 0;
+  const excludeDayCount = React.useMemo(() => {
+    const dayMs = 86400000;
+    return excludeDates.reduce((sum, item) => {
+      if (!item.from || !item.to) return sum;
+      const from = new Date(item.from + 'T00:00:00').getTime();
+      const to = new Date(item.to + 'T00:00:00').getTime();
+      if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return sum;
+      return sum + Math.round((to - from) / dayMs) + 1;
+    }, 0);
+  }, [excludeDates]);
+  const excludeFactor = excludeDayCount > 0
+    ? Math.max(0.8, 1 - Math.min(0.2, excludeDayCount * 0.01))
+    : 1;
+  const denoisedBaseDaily = +(last7 * excludeFactor).toFixed(1);
   const weightSum = weights.d3 + weights.d7 + weights.d15 + weights.d30;
   const dynamicDaily = weightSum === 0 ? null : Math.round(
-    (last7 * weights.d7 + (last7 * 1.05) * weights.d3 + (last7 * 0.95) * weights.d15 + (last7 * 0.92) * weights.d30) / weightSum
+    (denoisedBaseDaily * weights.d7 + (denoisedBaseDaily * 1.05) * weights.d3 + (denoisedBaseDaily * 0.95) * weights.d15 + (denoisedBaseDaily * 0.92) * weights.d30) / weightSum
   );
 
   // 左侧"最终未来平均日销"用独立 state,只在用户改具体配置项时更新,
@@ -382,9 +396,10 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
       <div style={{ flex: 1, padding: 18, overflow: 'auto', borderRight: '1px solid var(--border)', background: 'var(--surface-2)' }}>
         <div className="label" style={{ marginBottom: 10 }}>结果预览（实时）</div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginBottom: 14 }}>
           <PreviewKV k="近 7 天日销（原始）" v={sample.last7Daily}/>
-          <PreviewKV k="近 7 天日销（去噪后）" v={sample.last7Denoised}/>
+          <PreviewKV k="近 7 天日销（去噪后）" v={denoisedBaseDaily}/>
+          <PreviewKV k="排除异常时间" v={excludeDayCount ? excludeDayCount + ' 天' : '未设置'}/>
           <PreviewKV k="最终未来平均日销" v={finalDaily} highlight/>
           <PreviewKV k="预计断货时间" v={fmt.dateLong(new Date(Date.now() + stockoutDays * 86400000))}/>
           <PreviewKV k="建议采购量" v={fmt.num(Math.max(0, (sample.totalCoverage * finalDaily) - sample.totalStock)) + ' 件'} highlight/>
@@ -425,10 +440,10 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
       </div>
 
       {/* Right settings */}
-      <div style={{ width: 460, flex: 'none', padding: 20, overflow: 'auto' }}>
+      <div style={{ width: 600, flex: 'none', padding: 22, overflow: 'auto' }}>
         <div className="label" style={{ marginBottom: 8 }}>异常处理</div>
         <FieldRow label="排除异常时间" hint="时间段内的销量会被剔除">
-          <button className="btn sm" onClick={() => setExcludeDates([...excludeDates, { from: '', to: '', reason: '' }])}>
+          <button className="btn sm" onClick={() => setExcludeDates(prev => [...prev, { from: '', to: '', reason: '' }])}>
             <Icon name="plus" size={11}/>添加时间段
           </button>
         </FieldRow>
@@ -437,36 +452,49 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
             暂无排除时间段,点上方"添加时间段"新增
           </div>
         )}
+        {excludeDates.length > 0 && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '140px 140px minmax(180px, 1fr) 30px',
+            gap: 8,
+            padding: '0 8px 4px',
+            fontSize: 10.5,
+            color: 'var(--text-4)',
+          }}>
+            <span>开始日期</span>
+            <span>结束日期</span>
+            <span>原因</span>
+            <span/>
+          </div>
+        )}
         {excludeDates.map((d, i) => {
-          const update = (patch) => setExcludeDates(
-            excludeDates.map((row, j) => (j === i ? { ...row, ...patch } : row))
+          const update = (patch) => setExcludeDates(prev =>
+            prev.map((row, j) => (j === i ? { ...row, ...patch } : row))
           );
           return (
             <div key={i} style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 1fr 1.4fr auto',
-              gap: 6,
-              padding: '6px 8px',
+              gridTemplateColumns: '140px 140px minmax(180px, 1fr) 30px',
+              gap: 8,
+              padding: '8px',
               background: 'var(--surface-2)',
               borderRadius: 4,
-              marginBottom: 4,
+              marginBottom: 6,
               alignItems: 'center',
             }}>
-              <input
-                className="txt"
-                type="date"
+              <DatePicker
                 value={d.from || ''}
-                onChange={e => update({ from: e.target.value })}
-                style={{ height: 28, fontSize: 11.5, padding: '0 6px' }}
+                onChange={(value) => update({ from: value })}
+                placeholder="选择开始"
                 title="开始日期"
+                testId={`exclude-date-from-${i}`}
               />
-              <input
-                className="txt"
-                type="date"
+              <DatePicker
                 value={d.to || ''}
-                onChange={e => update({ to: e.target.value })}
-                style={{ height: 28, fontSize: 11.5, padding: '0 6px' }}
+                onChange={(value) => update({ to: value })}
+                placeholder="选择结束"
                 title="结束日期"
+                testId={`exclude-date-to-${i}`}
               />
               <input
                 className="txt"
@@ -474,11 +502,11 @@ function ForecastTab({ mode, setMode, fixedDaily, setFixedDaily, defaultDaily, s
                 value={d.reason || ''}
                 onChange={e => update({ reason: e.target.value })}
                 placeholder="原因(如 Prime Day)"
-                style={{ height: 28, fontSize: 11.5, padding: '0 8px' }}
+                style={{ width: '100%', minWidth: 0, height: 32, fontSize: 12, padding: '0 8px' }}
               />
               <button
                 className="btn ghost icon sm"
-                onClick={() => setExcludeDates(excludeDates.filter((_, j) => j !== i))}
+                onClick={() => setExcludeDates(prev => prev.filter((_, j) => j !== i))}
                 title="删除"
               ><Icon name="x" size={11}/></button>
             </div>
@@ -621,10 +649,10 @@ function CreatePOModal({ open, onClose, ids, showToast, setRoute }) {
         onClose();
         setStep('confirm');
         const msg = skipped > 0
-          ? `已生成 ${createdCount} 条草稿,跳过 ${skipped} 个无建议采购量的 SKU`
-          : `已生成 ${createdCount} 条采购草稿`;
+          ? `已生成 ${createdCount} 条采购计划,跳过 ${skipped} 个无建议采购量的 SKU`
+          : `已生成 ${createdCount} 条采购计划`;
         showToast(msg);
-        // 真跳转 — 进入采购草稿页,带 draftId 高亮
+        // 真跳转 — 进入采购计划页,带 draftId 高亮
         if (setRoute) setRoute({ page: 'drafts', draftId: newDraftId });
       }, 700);
     } catch (err) {
@@ -646,7 +674,7 @@ function CreatePOModal({ open, onClose, ids, showToast, setRoute }) {
       ) : exceedsLimit ? (
         <EmptyState icon="alert" tone="warn" title="最多只能选择 50 条数据" sub={`当前已选 ${ids.length} 条，请取消多余项后再试`}/>
       ) : allSkipped ? (
-        <EmptyState icon="alert" tone="warn" title="所选 SKU 均无建议采购量" sub="只有标记为「建议采购」的 SKU 可生成草稿,请重新筛选"/>
+        <EmptyState icon="alert" tone="warn" title="所选 SKU 均无建议采购量" sub="只有标记为「建议采购」的 SKU 可生成采购计划,请重新筛选"/>
       ) : noPermission ? (
         <EmptyState icon="alert" tone="warn" title="暂无采购计划创建权限" sub="请联系管理员开通「采购计划创建」权限"/>
       ) : step === 'computing' ? (
@@ -670,7 +698,7 @@ function CreatePOModal({ open, onClose, ids, showToast, setRoute }) {
           <div style={{ padding: 18 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
               <KV k="勾选 SKU" v={ids.length + ' 条'}/>
-              <KV k="可生成草稿" v={valid.length + ' 条'}/>
+              <KV k="可生成计划" v={valid.length + ' 条'}/>
               <KV k="建议采购总量" v={fmt.num(totalQty) + ' 件'}/>
             </div>
             {skipped > 0 && (

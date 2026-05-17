@@ -447,6 +447,16 @@ table.t tbody td {
   vertical-align: middle;
   white-space: nowrap;
 }
+table.t tfoot td {
+  position: sticky; bottom: 0; z-index: 2;
+  padding: 8px var(--row-pad-x);
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
 table.t tbody tr:hover td { background: color-mix(in srgb, var(--surface-hover) 76%, transparent); }
 table.t tbody tr.selected td { background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
 table.t .num { font-variant-numeric: tabular-nums; text-align: right; font-feature-settings: var(--feat-num); }

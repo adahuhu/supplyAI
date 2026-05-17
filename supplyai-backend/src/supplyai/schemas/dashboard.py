@@ -228,3 +228,15 @@ class HolidayUpsertRequest(BaseModel):
     flag: str | None = None
     country_code: str | None = None
     enabled: bool = True
+
+
+class HolidayDeleteRequest(BaseModel):
+    """节日删除 — 软删除后不再参与大促提醒和预测计算."""
+
+    tenant_id: int
+    holiday_id: str
+
+
+class HolidayDeleteDTO(BaseModel):
+    ok: bool
+    holiday_id: str

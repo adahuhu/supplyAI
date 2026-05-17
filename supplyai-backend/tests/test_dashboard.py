@@ -38,7 +38,7 @@ async def test_dashboard_snapshot_returns_suggest_summary(client: AsyncClient) -
     # seed 中 48 SKU,40 个建议采购,总量 30315
     assert data["suggest_sku_count"] == 40
     assert data["suggest_total_qty"] == 30315
-    assert data["stockout_7_count"] == 12  # P1 数量
+    assert data["stockout_7_count"] == 3  # 近 7 天实际 FBA 断货事件
     # 多币种结构
     amount = data["suggest_total_amount"]
     assert amount["base"]["currency"] == "USD"

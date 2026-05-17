@@ -124,6 +124,9 @@
     holidayUpsert(body) {
       return postJson('/dashboard/holidays/upsert', { tenant_id: TENANT_ID, ...body });
     },
+    holidayDelete(body) {
+      return postJson('/dashboard/holidays/delete', { tenant_id: TENANT_ID, ...body });
+    },
     authMe() {
       return postJson('/auth/me', {});
     },

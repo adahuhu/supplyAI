@@ -49,6 +49,18 @@ async def test_skus_list_filter_by_priority(client: AsyncClient) -> None:
         assert r["priority"] == "p1"
 
 
+async def test_skus_list_filter_by_recent_stockout(client: AsyncClient) -> None:
+    """7 天内断货筛选使用实际 FBA 断货事件,不是未来可售天数."""
+    response = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "stockout_within_days": 7, "page_size": 50},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    assert all(r["stockout_recent_7"] is True for r in data["rows"])
+
+
 async def test_skus_list_filter_by_mall(client: AsyncClient) -> None:
     """按 mall_id 筛选."""
     response = await client.post(

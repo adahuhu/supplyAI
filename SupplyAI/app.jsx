@@ -11,14 +11,51 @@ function initialRouteFromUrl() {
   const page = params.get('page');
   if (page === 'sku') return { page: 'sku', skuId: params.get('skuId') || undefined };
   if (page === 'list') return { page: 'list', filter: params.get('filter') || 'all' };
+  if (page === 'holiday') return { page: 'holiday', holidayId: params.get('holidayId') || undefined };
   return { page: 'dashboard' };
+}
+
+const GLOBAL_AI_INTRO = '我会基于库存、销量、在途和规则给出补货决策。你可以直接问：今天哪些 SKU 必须补货？哪些订单需要先生成采购计划？';
+
+const GLOBAL_AI_SCENARIOS = {
+  riskQueue: [
+    { role: 'user', text: '本周哪些 SKU 必须补货?按紧急度排序并说明原因。' },
+    { role: 'ai', text: '已按风险等级、预计断货时间和建议采购量整理高风险队列。', card: { type: 'risk_queue' } },
+  ],
+  holidayReadiness: [
+    { role: 'user', text: '下一个大促要为哪些 SKU 备货?缺口和建议采购量是多少?' },
+    { role: 'ai', text: '已按下一个大促节点关联风险 SKU，并测算活动备货缺口。', card: { type: 'holiday_readiness' } },
+  ],
+  planComparison: [
+    { role: 'user', text: '只海运 vs 海+空混合,成本和断货风险分别是什么?' },
+    { role: 'ai', text: '已对比海运、空运、海空混合的到货时间、缺货风险和成本影响。', card: { type: 'plan_comparison' } },
+  ],
+  ruleImpact: [
+    { role: 'user', text: '安全天数改成 21 天会怎样?采购量和风险等级有什么变化?' },
+    { role: 'ai', text: '已模拟安全天数调整后的采购量、覆盖需求和影响 SKU。', card: { type: 'rule_impact' } },
+  ],
+  ms40060: [
+    { role: 'user', text: '挑一个高风险 SKU,告诉我还能卖多久,要不要补、补多少?' },
+    {
+      role: 'ai',
+      text: '该 SKU 处于 P1 紧急风险，FBA 可售仅 1.99 天，预计于 2026-05-10 断货。\n基于全链路库存计算，建议采购 923 件以覆盖 1384.83 件的需求缺口；注意 unit_cost 缺失，采购金额 36.61 USD 仅为基准币参考值。\n请立即在前端确认以下采购草稿并二次审核：SKU MS40060，数量 923 件，供应商待补充。',
+    },
+  ],
+};
+
+function initialGlobalAiHistoryFromUrl() {
+  const base = [{ role: 'ai', text: GLOBAL_AI_INTRO }];
+  const scenario = new URLSearchParams(window.location.search).get('aiScenario');
+  return scenario && GLOBAL_AI_SCENARIOS[scenario]
+    ? [...base, ...GLOBAL_AI_SCENARIOS[scenario]]
+    : base;
 }
 
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [route, setRoute] = React.useState(initialRouteFromUrl);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => window.innerWidth < 760);
-  const [aiOpen, setAiOpen] = React.useState(false);
+  const [aiOpen, setAiOpen] = React.useState(() => new URLSearchParams(window.location.search).has('aiScenario'));
   const [aiWide, setAiWide] = React.useState(false);
   const [rulesCtx, setRulesCtx] = React.useState(null);
   const [poIds, setPoIds] = React.useState(null);
@@ -30,9 +67,7 @@ function App() {
   // Dashboard 顶部过滤器:store=mall_id 字符串、country=country code、owner=owner 名
   const [dashFilters, setDashFilters] = React.useState({ store: null, country: null, owner: null });
   // AI 对话历史 — 提升到 App 层,抽屉关闭后再打开仍可见
-  const [globalAiHistory, setGlobalAiHistory] = React.useState([
-    { role: 'ai', text: '你好,我是 SupplyAI 助手。可问风险、库存、采购建议,也可让我直接调工具查数据。' },
-  ]);
+  const [globalAiHistory, setGlobalAiHistory] = React.useState(initialGlobalAiHistoryFromUrl);
   const [skuAiHistoryMap, setSkuAiHistoryMap] = React.useState({}); // listingId -> messages[]
 
   // 把 dashFilters 翻译成各端点参数
@@ -137,7 +172,12 @@ function App() {
   };
 
   const openRules = (ctx) => setRulesCtx(ctx || {});
-  const openCreatePO = (ids) => setPoIds(ids || []);
+  const openCreatePO = (payload) => {
+    const items = (payload || []).map((it) => (
+      typeof it === 'object' && it !== null ? it : { id: it }
+    ));
+    setRoute({ page: 'drafts', ids: items.map(it => it.id), items });
+  };
 
   // Determine which AI to show
   const aiContent = (() => {
@@ -153,9 +193,9 @@ function App() {
           return { ...prev, [key]: next };
         });
       };
-      return <SKUAIPanel sku={sku} onClose={() => setAiOpen(false)} mode={t.aiMode} history={history} setHistory={setHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)}/>;
+      return <SKUAIPanel sku={sku} onClose={() => setAiOpen(false)} mode={t.aiMode} history={history} setHistory={setHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)} openCreatePO={openCreatePO} openRules={openRules}/>;
     }
-    return <GlobalAIPanel onClose={() => setAiOpen(false)} setRoute={(r) => { setRoute(r); }} dashFilters={dashFilters} history={globalAiHistory} setHistory={setGlobalAiHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)}/>;
+    return <GlobalAIPanel onClose={() => setAiOpen(false)} setRoute={(r) => { setRoute(r); }} openCreatePO={openCreatePO} openRules={openRules} dashFilters={dashFilters} history={globalAiHistory} setHistory={setGlobalAiHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)}/>;
   })();
 
   const aiInDrawer = aiOpen && (t.aiMode === 'drawer' || route.page !== 'sku');
@@ -210,6 +250,7 @@ function App() {
               <ErrorBoundary>
                 {route.page === 'dashboard' && <Dashboard setRoute={setRoute} openAI={() => setAiOpen(true)} openCreatePO={openCreatePO} dashFilters={dashFilters} setDashFilters={setDashFilters}/>}
                 {route.page === 'list' && <ListPage initialFilter={route.filter || 'all'} initialKeyword={route.keyword || ''} initialMallId={route.mallId || null} setRoute={setRoute} openRules={openRules} openCreatePO={openCreatePO}/>}
+                {route.page === 'holiday' && <HolidaySkuPage holidayId={route.holidayId} setRoute={setRoute} openCreatePO={openCreatePO}/>}
                 {route.page === 'sku' && <SKUDetail
                   skuId={route.skuId || (SKUS[0] && SKUS[0].id)}
                   setRoute={setRoute}
@@ -219,7 +260,7 @@ function App() {
                   aiOpen={aiInSplit}
                   aiMode={t.aiMode}
                 />}
-                {route.page === 'drafts' && <DraftsPage setRoute={setRoute} showToast={showToast} highlightDraftId={route.draftId}/>}
+                {route.page === 'drafts' && <DraftsPage setRoute={setRoute} showToast={showToast} initialIds={route.ids || []} initialItems={route.items || []}/>}
               </ErrorBoundary>
             )}
           </div>
@@ -262,7 +303,7 @@ function App() {
         <TweakSection label="快捷"/>
         <TweakButton label="跳到 SKU 详情演示" onClick={() => setRoute({ page: 'sku', skuId: SKUS[0].id })}/>
         <TweakButton label="打开规则设置弹窗" secondary onClick={() => setRulesCtx({ sku: SKUS[0] })}/>
-        <TweakButton label="打开采购计划弹窗" secondary onClick={() => setPoIds([SKUS[0].id, SKUS[1].id, SKUS[2].id])}/>
+        <TweakButton label="打开采购计划页面" secondary onClick={() => openCreatePO([SKUS[0].id, SKUS[1].id, SKUS[2].id])}/>
       </TweaksPanel>
     </div>
   );

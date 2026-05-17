@@ -11,6 +11,8 @@ from supplyai.schemas.dashboard import (
     ActionHint,
     AlertsDTO,
     AlertsRequest,
+    HolidayDeleteDTO,
+    HolidayDeleteRequest,
     HolidayItem,
     HolidayUpsertRequest,
     HolidaysDTO,
@@ -59,7 +61,16 @@ class DashboardService:
             owners=req.owners,
         )
         risk_counts = await self._repo.risk_counts(calc_run_id, req.tenant_id, **f)
-        stockout_7 = await self._repo.stockout_7_count(calc_run_id, req.tenant_id, **f)
+        stockout_since = datetime.combine(
+            as_of.date() - timedelta(days=6),
+            datetime.min.time(),
+        )
+        stockout_7 = await self._repo.stockout_7_count(
+            calc_run_id,
+            req.tenant_id,
+            stockout_since=stockout_since,
+            **f,
+        )
         total_sales_7d, total_stock = await self._repo.snapshot_aggregates(
             calc_run_id, req.tenant_id, **f
         )
@@ -156,6 +167,13 @@ class DashboardService:
             flag=row.flag,
             country_code=row.country_code,
         )
+
+    async def delete_holiday(self, req: HolidayDeleteRequest) -> HolidayDeleteDTO:
+        await self._repo.delete_holiday(
+            tenant_id=req.tenant_id,
+            holiday_id=req.holiday_id,
+        )
+        return HolidayDeleteDTO(ok=True, holiday_id=req.holiday_id)
 
     async def holidays(self, req: HolidaysRequest) -> HolidaysDTO:
         rows = await self._repo.list_holidays(

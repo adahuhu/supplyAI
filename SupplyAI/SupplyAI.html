@@ -7,27 +7,34 @@
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
 <title>SupplyAI · 供应链分析工作台</title>
-<link rel="stylesheet" href="tokens.css?v=20260509-risk-fba"/>
+<script>
+if (location.protocol === 'file:') {
+  const target = 'http://127.0.0.1:4173/SupplyAI.html' + location.search + location.hash;
+  document.write('<style>body{margin:0;background:#0a0a0a;color:#f4f4f5;font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}a{color:#93c5fd}</style><div>正在打开 SupplyAI 本地服务…<br/><a href="' + target + '">' + target + '</a></div>');
+  location.replace(target);
+}
+</script>
+<link rel="stylesheet" href="tokens.css?v=20260517-list-sort-holiday"/>
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" src="tweaks-panel.jsx?v=20260512-thinking-on"></script>
-<script src="api.jsx?v=20260512-thinking-on"></script>
-<script src="adapter.jsx?v=20260512-thinking-on"></script>
-<script src="md.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="data.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="ui.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="shell.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="dashboard.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="list.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="sku.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="ai.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="ai-fab.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="rules.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="drafts.jsx?v=20260512-thinking-on"></script>
-<script type="text/babel" src="app.jsx?v=20260512-thinking-on"></script>
+<script type="text/babel" src="tweaks-panel.jsx?v=20260517-ai-business"></script>
+<script src="api.jsx?v=20260517-holiday-delete"></script>
+<script src="adapter.jsx?v=20260517-stockout-actual"></script>
+<script src="md.jsx?v=20260517-ai-business"></script>
+<script type="text/babel" src="data.jsx?v=20260517-ai-business"></script>
+<script type="text/babel" src="ui.jsx?v=20260517-date-picker"></script>
+<script type="text/babel" src="shell.jsx?v=20260517-purchase-plan"></script>
+<script type="text/babel" src="dashboard.jsx?v=20260517-holiday-skus-stockout"></script>
+<script type="text/babel" src="list.jsx?v=20260517-sort-totals"></script>
+<script type="text/babel" src="sku.jsx?v=20260517-date-picker"></script>
+<script type="text/babel" src="ai.jsx?v=20260517-ai-card-plan-rule"></script>
+<script type="text/babel" src="ai-fab.jsx?v=20260517-ai-business"></script>
+<script type="text/babel" src="rules.jsx?v=20260517-date-picker"></script>
+<script type="text/babel" src="drafts.jsx?v=20260517-ai-plan-qty"></script>
+<script type="text/babel" src="app.jsx?v=20260517-ai-card-plan-rule"></script>
 </body>
 </html>

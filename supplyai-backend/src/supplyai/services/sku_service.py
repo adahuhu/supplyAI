@@ -1,7 +1,7 @@
 """SKU 应用服务."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from supplyai.models.mk import (
@@ -72,6 +72,7 @@ def _row_to_dto(
     last_shipment_date: "datetime | None" = None,
     estimated_arrival_date: "date | None" = None,
     recent_7d: list[int] | None = None,
+    stockout_recent_7: bool = False,
 ) -> SkuSummaryDTO:
     """ORM row tuple → SkuSummaryDTO."""
     fba_inbound = (
@@ -117,6 +118,7 @@ def _row_to_dto(
         lead_time_days=stat.lead_time_days,
         stockout_date=stat.stockout_date,
         purchase_date=stat.suggest_purchase_date,
+        stockout_recent_7=stockout_recent_7,
         suggest=bool(stat.suggest_purchase),
         suggest_qty=stat.suggest_qty,
         suggest_amount=_to_float(stat.suggest_amount),
@@ -156,6 +158,12 @@ class SkuService:
         )
         if not calc_run_id:
             raise CalcRunNotFoundException(req.tenant_id)
+        calc_run = await self._dashboard_repo.get_calc_run(calc_run_id)
+        as_of = calc_run.run_at if calc_run else datetime.utcnow()
+        stockout_since = datetime.combine(
+            as_of.date() - timedelta(days=6),
+            datetime.min.time(),
+        )
 
         rows, total = await self._sku_repo.list_skus(
             calc_run_id=calc_run_id,
@@ -170,6 +178,7 @@ class SkuService:
             page_size=req.page_size,
             sort_by=req.sort_by,
             sort_desc=req.sort_desc,
+            stockout_since=stockout_since,
         )
 
         # 批量查最近采购/发货时间 + 最早在途到货 + 过去 7 天每日销量(避免 N+1)
@@ -183,6 +192,11 @@ class SkuService:
         recent7_map = await self._sku_repo.recent_7d_sales_map(
             tenant_id=req.tenant_id, msku_mall_pairs=pairs
         )
+        stockout_recent_map = await self._sku_repo.stockout_recent_map(
+            tenant_id=req.tenant_id,
+            msku_mall_pairs=pairs,
+            since=stockout_since,
+        )
 
         items = []
         for stat, lps, mall_name in rows:
@@ -190,7 +204,18 @@ class SkuService:
             lp, ls = date_map.get(key, (None, None))
             ea = arrival_map.get(key)
             r7 = recent7_map.get(key, [])
-            items.append(_row_to_dto(stat, lps, mall_name, lp, ls, ea, r7))
+            items.append(
+                _row_to_dto(
+                    stat,
+                    lps,
+                    mall_name,
+                    lp,
+                    ls,
+                    ea,
+                    r7,
+                    stockout_recent_map.get(key, False),
+                )
+            )
         return PageResult[SkuSummaryDTO](
             rows=items,
             total=total,

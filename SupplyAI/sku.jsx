@@ -526,10 +526,79 @@ function TooltipMetric({ color, label, value, unit, strongColor }) {
 // ── V7 trend panel: sales + inventory + holiday bands ───────────────────────
 const TODAY_V7 = new Date('2026-05-04T00:00:00');
 
-// 节日数据完全来自后端 /dashboard/holidays(挂在 window.HOLIDAYS_DATA),
-// 不再硬编码。adapter 输出已经是 { id, name, flag, peak, sb, sa, dm, color } 格式。
+// 节日数据来自后端 /dashboard/holidays(挂在 window.HOLIDAYS_DATA)。
+// SKU 分析页允许维护自定义节日,并同步到全局大促提醒和趋势计算。
+const HOLIDAY_COLORS_V7 = ['#ec4899', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444'];
+
+function holidayPeakDateV7(value) {
+  if (!value) return null;
+  const d = new Date(String(value).includes('T') ? value : `${value}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function holidayAbsRangeV7(h) {
+  const peakDate = holidayPeakDateV7(h.peak || h.peak_date);
+  if (!peakDate) return { fromAbs: 1, toAbs: 1 };
+  const sb = Math.max(0, parseInt(h.sb ?? h.days_before ?? 0, 10) || 0);
+  const sa = Math.max(0, parseInt(h.sa ?? h.days_after ?? 0, 10) || 0);
+  const peakAbs = dateDiffV7(TODAY_V7, peakDate);
+  return { fromAbs: peakAbs - sb, toAbs: peakAbs + sa };
+}
+
+function normalizeHolidayV7(h, index = 0) {
+  const fallbackPeak = fmtYMDV7(dateAddV7(TODAY_V7, 14 + index));
+  const peak = h.peak || h.peak_date || fallbackPeak;
+  const mult = Number(h.mult ?? h.dm ?? h.sales_multiplier ?? 1) || 1;
+  const countryCode = h.countryCode ?? h.country_code ?? null;
+  const normalized = {
+    ...h,
+    id: h.id || h.holiday_id || `custom-holiday-${Date.now()}-${index}`,
+    name: h.name || '自定义大促',
+    flag: h.flag || '🎯',
+    peak,
+    sb: Math.max(0, parseInt(h.sb ?? h.days_before ?? 0, 10) || 0),
+    sa: Math.max(0, parseInt(h.sa ?? h.days_after ?? 0, 10) || 0),
+    dm: mult,
+    mult,
+    color: h.color || HOLIDAY_COLORS_V7[index % HOLIDAY_COLORS_V7.length],
+    countryCode,
+    country_code: countryCode,
+  };
+  const explicitRange = (h.isPointOverride || h.__useAbsRange)
+    && Number.isFinite(Number(h.fromAbs))
+    && Number.isFinite(Number(h.toAbs));
+  const range = explicitRange
+    ? { fromAbs: Number(h.fromAbs), toAbs: Number(h.toAbs) }
+    : holidayAbsRangeV7(normalized);
+  return { ...normalized, ...range };
+}
+
+function normalizeHolidayListV7(list) {
+  return (list || [])
+    .filter(Boolean)
+    .map((h, i) => normalizeHolidayV7(h, i))
+    .sort((a, b) => String(a.peak).localeCompare(String(b.peak)));
+}
+
+function setGlobalHolidaysV7(list) {
+  const normalized = normalizeHolidayListV7(list).filter(h => !h.isPointOverride);
+  window.HOLIDAYS_DATA = normalized.map(h => ({
+    id: h.id,
+    name: h.name,
+    flag: h.flag,
+    peak: h.peak,
+    sb: h.sb,
+    sa: h.sa,
+    dm: h.mult ?? h.dm ?? 1,
+    color: h.color,
+    countryCode: h.countryCode ?? null,
+    country_code: h.countryCode ?? null,
+  }));
+  return normalized;
+}
+
 function getHolidays() {
-  return window.HOLIDAYS_DATA || [];
+  return normalizeHolidayListV7(window.HOLIDAYS_DATA || []);
 }
 
 const TIME_RANGES_V7 = [
@@ -572,12 +641,6 @@ function extendHistoryV7(histRaw, targetDays, seed0) {
   return result.slice(-targetDays);
 }
 
-function holidayAbsRangeV7(h) {
-  const peakDate = new Date(h.peak);
-  const peakAbs = dateDiffV7(TODAY_V7, peakDate);
-  return { fromAbs: peakAbs - h.sb, toAbs: peakAbs + h.sa };
-}
-
 function buildForecastV7(baseFutureDaily, futDays, holidays) {
   const result = [];
   for (let i = 0; i < futDays; i++) {
@@ -605,10 +668,9 @@ function buildInventoryV7(startInv, forecastValues, invOverrides) {
 
 function TrendPanelV7({ sku }) {
   const [rangeId, setRangeId] = React.useState('30d');
-  const [holidays, setHolidays] = React.useState(() =>
-    getHolidays().map(h => ({ ...h, ...holidayAbsRangeV7(h), mult: h.dm }))
-  );
+  const [holidays, setHolidays] = React.useState(() => getHolidays());
   const [invOverrides, setInvOverrides] = React.useState({});
+  const [holidayModalOpen, setHolidayModalOpen] = React.useState(false);
   const range = TIME_RANGES_V7.find(r => r.id === rangeId) || TIME_RANGES_V7[1];
   const isLastYear = rangeId === 'lastYear';
   const forecast = React.useMemo(
@@ -622,6 +684,18 @@ function TrendPanelV7({ sku }) {
   const hasInvOvr = Object.keys(invOverrides).length > 0;
   const visH = holidays.filter(h => !h.isPointOverride && h.toAbs > 0 && h.fromAbs < range.futDays && Math.abs(h.mult - 1) > 0.01);
   const pointOvr = holidays.filter(h => h.isPointOverride);
+
+  const syncHolidayList = React.useCallback((next) => {
+    const normalized = normalizeHolidayListV7(next);
+    setGlobalHolidaysV7(normalized);
+    return normalized;
+  }, []);
+
+  const commitHolidayList = React.useCallback((next) => {
+    const normalized = syncHolidayList(next);
+    setHolidays(normalized);
+    return normalized;
+  }, [syncHolidayList]);
 
   // 节日变更后 debounce 700ms 把当条 upsert 到后端,避免拖动每帧都打。
   const upsertTimers = React.useRef({});
@@ -640,7 +714,7 @@ function TrendPanelV7({ sku }) {
         sales_multiplier: merged.mult ?? merged.dm ?? 1,
         color: merged.color || null,
         flag: merged.flag || null,
-        country_code: merged.country_code || null,
+        country_code: merged.countryCode ?? merged.country_code ?? null,
         enabled: true,
       }).catch(err => console.warn('[holidayUpsert]', err.message));
     }, 700);
@@ -650,15 +724,71 @@ function TrendPanelV7({ sku }) {
     setHolidays(prev => {
       const existing = prev.find(h => h.id === id);
       if (!existing) {
-        const merged = { ...patch, id };
+        const merged = normalizeHolidayV7({ ...patch, id, __useAbsRange: patch.fromAbs != null || patch.toAbs != null });
         scheduleUpsert(merged);
-        return [...prev, merged];
+        return syncHolidayList([...prev, merged]);
       }
-      const merged = { ...existing, ...patch };
+      const merged = normalizeHolidayV7({ ...existing, ...patch, __useAbsRange: patch.fromAbs != null || patch.toAbs != null });
       scheduleUpsert(merged);
-      return prev.map(h => h.id === id ? merged : h);
+      return syncHolidayList(prev.map(h => h.id === id ? merged : h));
     });
   };
+
+  const saveHoliday = React.useCallback(async (draft) => {
+    const normalized = normalizeHolidayV7(draft);
+    commitHolidayList([
+      ...holidays.filter(h => h.id !== normalized.id),
+      normalized,
+    ]);
+
+    if (!window.api || !window.api.holidayUpsert) return normalized;
+    try {
+      const resp = await window.api.holidayUpsert({
+        holiday_id: normalized.id,
+        name: normalized.name,
+        peak_date: normalized.peak,
+        days_before: normalized.sb,
+        days_after: normalized.sa,
+        sales_multiplier: normalized.mult,
+        color: normalized.color || null,
+        flag: normalized.flag || null,
+        country_code: normalized.countryCode || null,
+        enabled: true,
+      });
+      const adapted = window.adapter?.adaptHolidays
+        ? window.adapter.adaptHolidays({ holidays: [resp] })[0]
+        : {
+            id: resp.id,
+            name: resp.name,
+            peak: resp.peak_date,
+            sb: resp.days_before,
+            sa: resp.days_after,
+            dm: resp.sales_multiplier,
+            color: resp.color,
+            flag: resp.flag,
+            countryCode: resp.country_code,
+          };
+      const saved = normalizeHolidayV7(adapted || normalized);
+      commitHolidayList([
+        ...holidays.filter(h => h.id !== saved.id),
+        saved,
+      ]);
+      return saved;
+    } catch (err) {
+      console.warn('[holidayUpsert]', err.message);
+      return normalized;
+    }
+  }, [holidays, commitHolidayList]);
+
+  const deleteHoliday = React.useCallback(async (id) => {
+    commitHolidayList(holidays.filter(h => h.id !== id));
+    if (!window.api || !window.api.holidayDelete) return;
+    try {
+      await window.api.holidayDelete({ holiday_id: id });
+    } catch (err) {
+      console.warn('[holidayDelete]', err.message);
+    }
+  }, [holidays, commitHolidayList]);
 
   const handleInvOverride = (absDay, qty) => {
     setInvOverrides(prev => ({ ...prev, [absDay]: qty }));
@@ -684,13 +814,21 @@ function TrendPanelV7({ sku }) {
             className="btn sm ghost"
             style={{ fontSize: 11, color: 'var(--text-3)' }}
             onClick={() => {
-              setHolidays(getHolidays().map(h => ({ ...h, ...holidayAbsRangeV7(h), mult: h.dm })));
+              commitHolidayList(getHolidays());
               setInvOverrides({});
             }}
           >
             重置调整
           </button>
         )}
+        <button
+          data-testid="holiday-manager-open"
+          className="btn sm"
+          style={{ fontSize: 11 }}
+          onClick={() => setHolidayModalOpen(true)}
+        >
+          <Icon name="tag" size={12}/>节日管理
+        </button>
       </div>
 
       <TrendChartV7
@@ -756,7 +894,249 @@ function TrendPanelV7({ sku }) {
         <KV k="未来平均日销" v={hasAdj && !isLastYear ? `${(+adjAvg).toFixed(2)} (调后)` : (+sku.futureDaily).toFixed(2)}/>
         <KV k="未来 14 天合计" v={fmt.num(forecast.slice(0, 14).reduce((sum, item) => sum + item.value, 0))}/>
       </div>
+
+      {holidayModalOpen && (
+        <HolidayManagerModal
+          holidays={holidays.filter(h => !h.isPointOverride)}
+          onClose={() => setHolidayModalOpen(false)}
+          onSave={saveHoliday}
+          onDelete={deleteHoliday}
+        />
+      )}
     </div>
+  );
+}
+
+function defaultHolidayDraftV7() {
+  return normalizeHolidayV7({
+    id: `custom-holiday-${Date.now()}`,
+    name: '',
+    flag: '🎯',
+    peak: fmtYMDV7(dateAddV7(TODAY_V7, 14)),
+    sb: 7,
+    sa: 3,
+    mult: 1.3,
+    color: HOLIDAY_COLORS_V7[0],
+    countryCode: '',
+  });
+}
+
+function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
+  const [editingId, setEditingId] = React.useState(null);
+  const [form, setForm] = React.useState(() => defaultHolidayDraftV7());
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const countryOptions = (window.FILTERS_DATA?.countries || []).map(c => ({
+    value: c.value || c.code || '',
+    label: c.label || c.name || c.value || c.code || '',
+  }));
+  const sorted = normalizeHolidayListV7(holidays);
+
+  const startCreate = () => {
+    setEditingId(null);
+    setForm(defaultHolidayDraftV7());
+    setError('');
+  };
+
+  const startEdit = (h) => {
+    const next = normalizeHolidayV7(h);
+    setEditingId(next.id);
+    setForm(next);
+    setError('');
+  };
+
+  const setField = (key, value) => {
+    setForm(prev => normalizeHolidayV7({ ...prev, [key]: value }));
+  };
+
+  const validate = () => {
+    if (!form.name.trim()) return '请填写节日名称';
+    if (!holidayPeakDateV7(form.peak)) return '请选择有效日期';
+    if (Number(form.mult) <= 0) return '销量系数必须大于 0';
+    return '';
+  };
+
+  const submit = async () => {
+    const msg = validate();
+    if (msg) {
+      setError(msg);
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(normalizeHolidayV7({
+        ...form,
+        id: editingId || form.id,
+        name: form.name.trim(),
+        countryCode: form.countryCode || null,
+      }));
+      startCreate();
+    } catch (err) {
+      setError(err.message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (h) => {
+    setSaving(true);
+    setError('');
+    try {
+      await onDelete(h.id);
+      if (editingId === h.id) startCreate();
+    } catch (err) {
+      setError(err.message || '删除失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={true} onClose={onClose} width={980}>
+      <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div className="h3">节日信息管理</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 3 }}>
+            创建或调整节日窗口后，会立即参与当前 SKU 趋势计算，并进入工作台大促提醒。
+          </div>
+        </div>
+        <button className="btn sm" onClick={startCreate}><Icon name="plus" size={12}/>新建节日</button>
+        <button className="btn ghost icon sm" onClick={onClose}><Icon name="x" size={14}/></button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) 360px', minHeight: 500, maxHeight: 'calc(100vh - 150px)' }}>
+        <div style={{ overflow: 'auto', borderRight: '1px solid var(--border)' }}>
+          <table className="t" style={{ minWidth: 0 }}>
+            <thead>
+              <tr>
+                <th>节日</th>
+                <th>日期</th>
+                <th className="num">窗口</th>
+                <th className="num">系数</th>
+                <th>国家</th>
+                <th style={{ width: 92 }}>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(h => (
+                <tr key={h.id} className={editingId === h.id ? 'selected' : ''}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: h.color, display: 'inline-block' }}/>
+                      <span>{h.flag}</span>
+                      <span style={{ fontWeight: 500 }}>{h.name}</span>
+                    </div>
+                  </td>
+                  <td className="tabular">{h.peak}</td>
+                  <td className="num tabular">前 {h.sb} / 后 {h.sa}</td>
+                  <td className="num tabular">x{Number(h.mult).toFixed(2)}</td>
+                  <td>{h.countryCode || '全部'}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button className="btn ghost icon sm" title="编辑" onClick={() => startEdit(h)}><Icon name="edit" size={12}/></button>
+                      <button className="btn ghost icon sm" title="删除" onClick={() => remove(h)}><Icon name="trash" size={12}/></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!sorted.length && (
+                <tr><td colSpan="6" style={{ color: 'var(--text-3)', textAlign: 'center', padding: 28 }}>暂无节日配置</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, overflow: 'auto' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{editingId ? '编辑节日' : '新建节日'}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 3 }}>
+              影响窗口内预测日销会乘以节日系数。
+            </div>
+          </div>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+            <span style={{ color: 'var(--text-3)' }}>节日名称</span>
+            <input data-testid="holiday-name" className="txt" value={form.name} placeholder="例如 Prime Day 第二波"
+              onChange={e => setField('name', e.target.value)}/>
+          </label>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 86px', gap: 8 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+              <span style={{ color: 'var(--text-3)' }}>峰值日期</span>
+              <DatePicker
+                value={form.peak}
+                onChange={(value) => setField('peak', value)}
+                placeholder="选择日期"
+                title="峰值日期"
+                testId="holiday-peak"
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+              <span style={{ color: 'var(--text-3)' }}>标识</span>
+              <input data-testid="holiday-flag" className="txt" value={form.flag} maxLength={4}
+                onChange={e => setField('flag', e.target.value)}/>
+            </label>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+              <span style={{ color: 'var(--text-3)' }}>提前天数</span>
+              <input data-testid="holiday-before" className="txt" type="number" min={0} max={180} value={form.sb}
+                onChange={e => setField('sb', e.target.value)}/>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+              <span style={{ color: 'var(--text-3)' }}>延后天数</span>
+              <input data-testid="holiday-after" className="txt" type="number" min={0} max={180} value={form.sa}
+                onChange={e => setField('sa', e.target.value)}/>
+            </label>
+          </div>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+            <span style={{ color: 'var(--text-3)' }}>销量系数</span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input data-testid="holiday-mult-range" type="range" min={0.1} max={4} step={0.05} value={form.mult}
+                onChange={e => setField('mult', e.target.value)}
+                style={{ flex: 1, accentColor: 'var(--accent)' }}/>
+              <input data-testid="holiday-mult-number" className="txt" type="number" min={0.1} max={4} step={0.05} value={form.mult}
+                onChange={e => setField('mult', e.target.value)}
+                style={{ width: 88, textAlign: 'right' }}/>
+            </div>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+            <span style={{ color: 'var(--text-3)' }}>适用国家</span>
+            <select data-testid="holiday-country" className="sel" value={form.countryCode || ''} onChange={e => setField('countryCode', e.target.value)}>
+              <option value="">全部国家</option>
+              {countryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </label>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ color: 'var(--text-3)', fontSize: 12 }}>色带颜色</span>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {HOLIDAY_COLORS_V7.map(color => (
+                <button key={color} title={color} onClick={() => setField('color', color)}
+                  style={{
+                    width: 24, height: 24, borderRadius: 6, cursor: 'pointer',
+                    border: `2px solid ${form.color === color ? 'var(--text)' : 'transparent'}`,
+                    background: color,
+                  }}/>
+              ))}
+            </div>
+          </div>
+
+          {error && <div style={{ color: 'var(--p1-strong)', fontSize: 12 }}>{error}</div>}
+
+          <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8 }}>
+            <button className="btn" onClick={startCreate} disabled={saving}>清空</button>
+            <button data-testid="holiday-submit" className="btn primary" onClick={submit} disabled={saving}>
+              {saving ? '保存中…' : editingId ? '保存修改' : '创建节日'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -1347,7 +1727,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
               <KV
                 k="上次采购"
                 v={sku.lastPurchaseAt ? fmt.dateLong(sku.lastPurchaseAt) : '—'}
-                hint={sku.lastPurchaseAt ? fmt.rel(sku.lastPurchaseAt) + ' · 来自采购草稿' : '暂无采购记录'}/>
+                hint={sku.lastPurchaseAt ? fmt.rel(sku.lastPurchaseAt) + ' · 来自采购计划' : '暂无采购记录'}/>
               <KV
                 k="预计到货"
                 v={sku.estimatedArrivalAt ? fmt.dateLong(sku.estimatedArrivalAt) : '—'}

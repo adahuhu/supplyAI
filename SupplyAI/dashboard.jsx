@@ -111,21 +111,16 @@ function FinancialSummary() {
 
 // Dashboard hero — "今日要做的事" 工作摘要。把分散在 4-up panels 里的关键信号
 // 浓缩成一个动作驱动的陈述，放在第一屏视觉中心。下方所有 panel 保留不动。
-function HeroSummary({ setRoute, openCreatePO }) {
+function HeroSummary({ setRoute }) {
   const data = React.useMemo(() => {
     const suggested = SKUS.filter((s) => s.suggest);
-    const urgent = SKUS.filter((s) => s.fbaSellable <= 7).length;
+    const urgent = SKUS.filter((s) => s.stockoutRecent7).length;
     const totalAmount = Math.round(
       suggested.reduce((sum, s) => sum + s.suggestQty * s.cost, 0)
     );
     const storeCount = new Set(suggested.map((s) => s.store)).size;
     return { needCount: suggested.length, urgent, totalAmount, storeCount };
   }, []);
-
-  const handleBatch = () => {
-    const ids = SKUS.filter((s) => s.suggest).slice(0, 50).map((s) => s.id);
-    openCreatePO(ids);
-  };
 
   return (
     <section
@@ -198,14 +193,6 @@ function HeroSummary({ setRoute, openCreatePO }) {
         flex: 'none'
       }}>
         <button
-          className="btn primary"
-          style={{ height: 36, padding: '0 16px', fontSize: 13 }}
-          onClick={handleBatch}>
-
-          <Icon name="lightning" size={13} />
-          批量生成采购计划
-        </button>
-        <button
           className="btn ghost sm"
           style={{ color: 'var(--accent-text)' }}
           onClick={() => setRoute({ page: 'list', filter: 'p1' })}>
@@ -225,6 +212,51 @@ const ACTION_HINT_META = {
   ok:              { label: '正常',     cls: 'safe' },
 };
 
+const HOLIDAY_NAME_LABEL = {
+  'Mothers Day': '母亲节',
+  "Mother's Day": '母亲节',
+  'Memorial Day': 'Memorial Day',
+  'Prime Day': 'Prime Day',
+};
+
+function holidayLabel(h) {
+  return h ? (HOLIDAY_NAME_LABEL[h.name] || h.name || '大促') : '大促';
+}
+
+function holidayDate(h) {
+  if (!h?.peak) return null;
+  const d = new Date(h.peak + 'T00:00:00');
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function nextHolidayFromData(asOf) {
+  const today = asOf instanceof Date && !Number.isNaN(asOf.getTime()) ? asOf : new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const list = (window.HOLIDAYS_DATA || [])
+    .map(h => ({ ...h, peakDate: holidayDate(h) }))
+    .filter(h => h.peakDate && h.peakDate.getTime() >= todayStart)
+    .sort((a, b) => a.peakDate - b.peakDate);
+  return list[0] || null;
+}
+
+function holidayRelatedSkus(holiday, skus = SKUS) {
+  if (!holiday) return [];
+  const countryCode = holiday.countryCode || null;
+  return skus
+    .filter(s => !countryCode || s.country?.code === countryCode)
+    .filter(s => s.suggest || s.priority === 'p1' || s.priority === 'p2')
+    .sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9)
+      || (a.stockoutDate?.getTime?.() || 0) - (b.stockoutDate?.getTime?.() || 0));
+}
+
+function daysUntil(date, asOf) {
+  if (!date) return null;
+  const base = asOf instanceof Date && !Number.isNaN(asOf.getTime()) ? asOf : new Date();
+  const a = new Date(base.getFullYear(), base.getMonth(), base.getDate()).getTime();
+  const b = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return Math.round((b - a) / 86400000);
+}
+
 function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters }) {
   const stats = DASH_STATS;
   // /dashboard/risk-queue 返回的 listing_id → action_hint 映射
@@ -243,6 +275,16 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
   }, []);
 
   const queue = SKUS.filter((s) => s.priority === 'p1' || s.priority === 'p2').slice(0, 8);
+  const nextHoliday = nextHolidayFromData(stats.asOf);
+  const nextHolidaySkus = holidayRelatedSkus(nextHoliday);
+  const nextHolidayD = daysUntil(nextHoliday?.peakDate, stats.asOf);
+  const followHoliday = (window.HOLIDAYS_DATA || [])
+    .map(h => ({ ...h, peakDate: holidayDate(h) }))
+    .filter(h => h.peakDate && nextHoliday && h.id !== nextHoliday.id && h.peakDate > nextHoliday.peakDate)
+    .sort((a, b) => a.peakDate - b.peakDate)
+    .slice(0, 2)
+    .map(h => 'D-' + Math.max(0, daysUntil(h.peakDate, stats.asOf)))
+    .join(' / ');
 
   return (
     <div style={{ padding: '24px 32px 48px', maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -256,7 +298,7 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
       </div>
 
       {/* Hero — 今日工作摘要 */}
-      <HeroSummary setRoute={setRoute} openCreatePO={openCreatePO} />
+      <HeroSummary setRoute={setRoute} />
 
       {/* Financial summary — 1 hero (利润) + 2x2 grid (销量/收入/成本/费用).
           不对称布局：利润有 sparkline 占大头，其他 4 项紧凑。
@@ -348,7 +390,7 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <span style={{ fontSize: 11.5, color: 'var(--text-2)', fontWeight: 500, letterSpacing: '-0.005em' }}>近七天断货 SKU</span>
               <button className="btn sm ghost" style={{ height: 22, padding: '0 6px', fontSize: 11.5 }}
-                onClick={() => setRoute({ page: 'list', filter: 'p1' })}>查看 →</button>
+                onClick={() => setRoute({ page: 'list', filter: 'stockout7' })}>查看 →</button>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div className="tabular" style={{
@@ -363,7 +405,7 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
               </div>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-              累计 SKU · 当日库存 = 0
+              近 7 天实际 FBA 无可用量 · 排除更早断货
             </div>
           </div>
 
@@ -389,22 +431,39 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
           </div>
 
           {/* 下一个大促 */}
-          <div className="card" style={{ padding: '12px 16px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button
+            className="card interactive"
+            onClick={() => nextHoliday && setRoute({ page: 'holiday', holidayId: nextHoliday.id })}
+            style={{
+              appearance: 'none',
+              textAlign: 'left',
+              fontFamily: 'inherit',
+              color: 'inherit',
+              cursor: nextHoliday ? 'pointer' : 'default',
+              padding: '12px 16px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <span style={{ fontSize: 11.5, color: 'var(--text-2)', fontWeight: 500, letterSpacing: '-0.005em' }}>下一个大促</span>
+              {nextHoliday && <span style={{ fontSize: 11, color: 'var(--accent-text)' }}>查看 SKU →</span>}
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
               <div className="tabular" style={{
                 fontSize: 26, fontWeight: 600, letterSpacing: '-0.022em',
                 lineHeight: 1, color: 'var(--p2)'
-              }}>D-12</div>
-              <span style={{ fontSize: 12, fontWeight: 500 }}>母亲节</span>
-              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>· 5/17</span>
+              }}>{nextHolidayD == null ? '—' : 'D-' + Math.max(0, nextHolidayD)}</div>
+              <span style={{ fontSize: 12, fontWeight: 500 }}>{nextHoliday ? `${nextHoliday.flag || ''} ${holidayLabel(nextHoliday)}` : '暂无大促'}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                {nextHoliday?.peakDate ? `· ${nextHoliday.peakDate.getMonth() + 1}/${nextHoliday.peakDate.getDate()}` : ''}
+              </span>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-              待备货 SKU 14 · 后续 D-32 / D-56
+              待备货 SKU {nextHolidaySkus.length}
+              {followHoliday ? ` · 后续 ${followHoliday}` : ''}
             </div>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -413,7 +472,7 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 12 }}>
       <Panel
           title="高风险 SKU 队列"
-          sub={<span>按 P1 → P2排序 · <span style={{ color: 'var(--p1)', fontWeight: 600 }}>{stats.stockout7}</span> 个 SKU 将在 7 天内断货</span>}
+	          sub={<span>按 P1 → P2排序 · <span style={{ color: 'var(--p1)', fontWeight: 600 }}>{stats.stockout7}</span> 个 SKU 近 7 天实际断货</span>}
           right={
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="btn sm primary"
@@ -518,6 +577,104 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
       </div>
     </div>);
 
+}
+
+function HolidaySkuPage({ holidayId, setRoute, openCreatePO }) {
+  const holidays = (window.HOLIDAYS_DATA || []).map(h => ({ ...h, peakDate: holidayDate(h) }));
+  const holiday = holidays.find(h => h.id === holidayId) || nextHolidayFromData(DASH_STATS.asOf) || holidays[0] || null;
+  const rows = holidayRelatedSkus(holiday);
+  const d = daysUntil(holiday?.peakDate, DASH_STATS.asOf);
+  const totalSuggestQty = rows.reduce((sum, s) => sum + (s.suggest ? (s.suggestQty || 0) : 0), 0);
+  const totalStock = rows.reduce((sum, s) => sum + (s.totalStock || 0), 0);
+
+  return (
+    <div style={{ padding: '24px 32px 48px', maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <button className="btn ghost sm" onClick={() => setRoute({ page: 'dashboard' })}>
+          <Icon name="chevron-left" size={13}/>返回工作台
+        </button>
+      </div>
+
+      <section className="card" style={{ padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <div className="label">下一个大促</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+            <div className="tabular" style={{ fontSize: 34, fontWeight: 620, color: 'var(--p2)', lineHeight: 1 }}>
+              {d == null ? '—' : 'D-' + Math.max(0, d)}
+            </div>
+            <div className="h1" style={{ fontSize: 26 }}>
+              {holiday ? `${holiday.flag || ''} ${holidayLabel(holiday)}` : '暂无大促'}
+            </div>
+            <div style={{ color: 'var(--text-3)', fontSize: 13 }}>
+              {holiday?.peakDate ? fmt.dateLong(holiday.peakDate) : ''}
+            </div>
+          </div>
+        </div>
+        <KV k="关联 SKU" v={rows.length + ' 个'} />
+        <KV k="建议采购量" v={fmt.num(totalSuggestQty) + ' 件'} />
+        <KV k="当前总库存" v={fmt.num(totalStock) + ' 件'} />
+      </section>
+
+      <Panel
+        title="大促关联 SKU"
+        sub="按国家/站点和当前补货风险关联，点击行进入 SKU 分析"
+        right={
+          <button className="btn sm primary" onClick={() => openCreatePO(rows.filter(s => s.suggest).map(s => s.id))} disabled={!rows.some(s => s.suggest)}>
+            <Icon name="lightning" size={12}/>生成采购计划
+          </button>
+        }
+        noPad>
+        {rows.length === 0 ? (
+          <div style={{ padding: 28, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+            当前大促暂无关联 SKU
+          </div>
+        ) : (
+          <div className="tbl-wrap" style={{ border: 0, borderRadius: 0 }}>
+            <table className="t">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>MSKU</th>
+                  <th>店铺 / 国家</th>
+                  <th>风险</th>
+                  <th className="num">未来日销</th>
+                  <th className="num">总库存</th>
+                  <th className="num">FBA 可售</th>
+                  <th className="num">建议采购量</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(s => (
+                  <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => setRoute({ page: 'sku', skuId: s.id })}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 320 }}>
+                        <ProductImage label={s.msku.slice(-3)} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>{s.sku}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="mono" style={{ color: 'var(--text-2)' }}>{s.msku}</td>
+                    <td>{s.country.flag} {s.store}</td>
+                    <td><PriorityBadge level={s.priority}/></td>
+                    <td className="num tabular">{s.futureDaily}</td>
+                    <td className="num tabular">{fmt.num(s.totalStock)}</td>
+                    <td className="num tabular">{s.fbaSellable} 天</td>
+                    <td className="num tabular" style={{ fontWeight: 500 }}>{s.suggest ? fmt.num(s.suggestQty) : '—'}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button className="btn sm ghost" onClick={() => setRoute({ page: 'sku', skuId: s.id })}>查看 SKU 分析</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
 }
 // Dashboard 顶部三个过滤器 — 选中后通过 setDashFilters 触发 App 层重新拉数据.
 function DashboardFilters({ filters, setFilters }) {
@@ -649,4 +806,4 @@ function Panel({ title, sub, right, children, noPad, style }) {
     </section>);
 }
 
-Object.assign(window, { Dashboard, Panel, Filter });
+Object.assign(window, { Dashboard, HolidaySkuPage, Panel, Filter });

@@ -26,12 +26,31 @@
     return COUNTRY_TABLE[code.toUpperCase()] || { ...FALLBACK_COUNTRY, code };
   }
 
+  function normalizeNumberList(v) {
+    return Array.isArray(v)
+      ? v.map(x => Number(x || 0)).filter(x => Number.isFinite(x))
+      : [];
+  }
+
+  function isRecentStockout7(row) {
+    const fba7 = normalizeNumberList(
+      row.fba_available_7d || row.fba_available_recent_7d || row.fba_available_history_7d
+    );
+    if (fba7.length >= 7) return fba7.slice(-7).every(v => v <= 0);
+    if (row.stockout_recent_7 != null) return !!row.stockout_recent_7;
+    return false;
+  }
+
   function adaptSkuSummary(row) {
     const country = toCountry(row.country_code);
     const fbaInTransit = row.fba_inbound || 0;
     const fbaAvail = row.fba_available || 0;
     const localActual = row.local_actual || 0;
     const localPlan = row.local_plan || 0;
+    const fbaAvailable7 = normalizeNumberList(
+      row.fba_available_7d || row.fba_available_recent_7d || row.fba_available_history_7d
+    );
+    const stockoutRecent7 = isRecentStockout7(row);
     return {
       // 标识 — id 用 String(listing_id) 保持路由兼容
       id: String(row.id),
@@ -64,6 +83,8 @@
 
       // 库存
       fbaAvail, fbaInTransit, localActual, localPlan,
+      fbaAvailable7,
+      stockoutRecent7,
       localTotal: localActual + localPlan,
       totalStock: row.total_stock ?? 0,
       sellable: row.sellable_days != null ? +(+row.sellable_days).toFixed(2) : 0,
@@ -79,7 +100,7 @@
 
       // 新增运营字段 — 真实来自后端 (rl_fba_shipment_item / mk_purchase_draft / mk_sku_inbound_detail)
       lastShipmentAt: toDate(row.last_shipment_date),  // 上次发货时间
-      lastPurchaseAt: toDate(row.last_purchase_date),  // 上次采购时间(来自最近的草稿 confirmed_at)
+      lastPurchaseAt: toDate(row.last_purchase_date),  // 上次采购时间(来自最近的采购计划 confirmed_at)
       estimatedArrivalAt: toDate(row.estimated_arrival_date), // 最早一笔在途的预计到货
       suggest: !!row.suggest,
       suggestQty: row.suggest_qty || 0,
@@ -181,6 +202,7 @@
       sa: h.days_after,
       dm: h.sales_multiplier,  // demand multiplier
       color: h.color || '#3b82f6',
+      countryCode: h.country_code || null,
     }));
   }
 
@@ -201,9 +223,10 @@
     const totalRev7 = skus.reduce((sum, s) => sum + (s.revenue7 || 0), 0);
     const overstockCount = skus.filter(s => s.sellable > 90).length;
     const overstockQty = skus.filter(s => s.sellable > 90).reduce((sum, s) => sum + s.totalStock, 0);
+    const stockout7Actual = skus.filter(s => s.stockoutRecent7).length;
     return {
       counts,
-      stockout7: snapshot.stockout_7_count || 0,
+      stockout7: stockout7Actual,
       suggestSkuCount: snapshot.suggest_sku_count || 0,
       suggestTotalQty: snapshot.suggest_total_qty || 0,
       suggestTotalAmountBase: snapshot.suggest_total_amount?.base?.amount || 0,
@@ -229,15 +252,11 @@
       overstockCount,
       overstockQty,
 
-      // 后端 stockout_trend 未派生时,从 SKUS 反推"未来 N 天累计断货堆积"
-      // skus.filter(fbaSellable <= n).length,n=1..7 → 单调递增曲线
+      // 后端 stockout_trend 未派生时,按实际近 7 天断货标记兜底。
       stockoutTrend: (snapshot.stockout_trend && snapshot.stockout_trend.length)
         ? snapshot.stockout_trend.map(p => p.count)
-        : [1, 2, 3, 4, 5, 6, 7].map(n =>
-            skus.filter(s => (s.fbaSellable ?? 9999) <= n).length
-          ),
-      stockoutTrendTotal: snapshot.stockout_7_count
-        ?? (snapshot.stockout_trend || []).reduce((a, p) => a + (p.count || 0), 0),
+        : [0, 0, 0, 0, 0, 0, stockout7Actual],
+      stockoutTrendTotal: stockout7Actual,
 
       healthScore: 0, // 后端待补
     };
@@ -299,6 +318,7 @@
     adaptHolidays,
     adaptMe,
     mergeTrendsIntoSku,
+    isRecentStockout7,
     toCountry,
     toDate,
   };

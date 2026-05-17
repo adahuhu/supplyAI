@@ -78,6 +78,7 @@ class SkuSummaryDTO(BaseModel):
     lead_time_days: int | None
     stockout_date: date | None
     purchase_date: date | None
+    stockout_recent_7: bool = False
     # 建议
     suggest: bool
     suggest_qty: int

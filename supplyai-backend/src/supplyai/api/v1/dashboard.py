@@ -17,6 +17,8 @@ from supplyai.schemas.dashboard import (
     FiltersRequest,
     FinanceDTO,
     FinanceRequest,
+    HolidayDeleteDTO,
+    HolidayDeleteRequest,
     HolidayItem,
     HolidayUpsertRequest,
     HolidaysDTO,
@@ -105,5 +107,16 @@ async def upsert_holiday(
 ) -> HolidayItem:
     """新建或更新一条节日 — 节日色带前端拖动后调用."""
     result = await _build_service(session).upsert_holiday(req)
+    await session.commit()
+    return result
+
+
+@router.post("/holidays/delete", response_model=HolidayDeleteDTO)
+async def delete_holiday(
+    req: HolidayDeleteRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> HolidayDeleteDTO:
+    """删除一条节日 — 软删除后不再参与大促提醒和预测计算."""
+    result = await _build_service(session).delete_holiday(req)
     await session.commit()
     return result

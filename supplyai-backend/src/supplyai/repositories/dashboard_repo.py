@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections import defaultdict
 from decimal import Decimal
 
+from datetime import datetime
+
 from sqlalchemy import asc, case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,16 +117,27 @@ class DashboardRepository:
         mall_ids: list[int] | None = None,
         country_codes: list[str] | None = None,
         owners: list[str] | None = None,
+        stockout_since: datetime | None = None,
     ) -> int:
         """7 天内 FBA 断货 SKU 数,可选过滤."""
-        from supplyai.models.mk import MkListingProductSources
+        from supplyai.models.mk import MkListingProductSources, MkStockoutEvent
 
         stat = MkSupplySkuDailyStat
         filters = [
             stat.calc_run_id == calc_run_id,
             stat.tenant_id == tenant_id,
-            stat.fba_sellable_days <= 7,
         ]
+        if stockout_since is not None:
+            filters.append(
+                select(MkStockoutEvent.event_id)
+                .where(
+                    MkStockoutEvent.tenant_id == stat.tenant_id,
+                    MkStockoutEvent.mall_id == stat.mall_id,
+                    MkStockoutEvent.msku == stat.msku,
+                    MkStockoutEvent.start_at >= stockout_since,
+                )
+                .exists()
+            )
         if mall_ids:
             filters.append(stat.mall_id.in_(mall_ids))
         if country_codes:
@@ -288,6 +301,21 @@ class DashboardRepository:
         existing.enabled = 1 if payload.get("enabled", True) else 0
         await self._session.flush()
         return existing
+
+    async def delete_holiday(self, *, tenant_id: int, holiday_id: str) -> bool:
+        from supplyai.models.mk import MkHoliday
+
+        existing = await self._session.scalar(
+            select(MkHoliday).where(
+                MkHoliday.tenant_id == tenant_id,
+                MkHoliday.holiday_id == holiday_id,
+            )
+        )
+        if existing is None:
+            return False
+        existing.enabled = 0
+        await self._session.flush()
+        return True
 
     async def list_holidays(
         self, *, tenant_id: int, country_code: str | None = None

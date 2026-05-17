@@ -1,5 +1,47 @@
 // 备货计划列表页 — full data table with filters, batch ops, column config.
 
+const LIST_SORT_ACCESSORS = {
+  product: s => s.name || '',
+  store: s => s.store || '',
+  status: s => s.status || '',
+  priority: s => PRIORITY_ORDER[s.priority] ?? 99,
+  sales7d: s => s.sales7d ?? (s.recent7 || []).reduce((a, b) => a + b, 0),
+  futureDaily: s => s.futureDaily ?? 0,
+  revenue7: s => s.revenue7 ?? 0,
+  grossMargin: s => s.grossMargin ?? null,
+  fbaAvail: s => s.fbaAvail ?? 0,
+  fbaInTransit: s => s.fbaInTransit ?? 0,
+  localTotal: s => s.localTotal ?? 0,
+  localPlan: s => s.localPlan ?? 0,
+  totalStock: s => s.totalStock ?? 0,
+  sellable: s => s.sellable ?? null,
+  stockoutDate: s => s.stockoutDate ? s.stockoutDate.getTime() : null,
+  lastShipmentAt: s => s.lastShipmentAt ? s.lastShipmentAt.getTime() : null,
+  lastPurchaseAt: s => s.lastPurchaseAt ? s.lastPurchaseAt.getTime() : null,
+  purchaseLeadTime: s => s.purchaseLeadTime ?? 0,
+  suggest: s => s.suggest ? 1 : 0,
+  suggestQty: s => s.suggest ? (s.suggestQty ?? 0) : 0,
+  purchaseDate: s => s.purchaseDate ? s.purchaseDate.getTime() : null,
+  lastUpdated: s => s.lastUpdated ? s.lastUpdated.getTime() : null,
+};
+
+function isStockout7Sku(s) {
+  if (s && Array.isArray(s.fbaAvailable7) && s.fbaAvailable7.length >= 7) {
+    return s.fbaAvailable7.slice(-7).every(v => Number(v || 0) <= 0);
+  }
+  return !!s?.stockoutRecent7;
+}
+
+function sumBy(rows, fn) {
+  return rows.reduce((sum, row) => sum + (Number(fn(row)) || 0), 0);
+}
+
+function avgBy(rows, fn) {
+  const vals = rows.map(fn).filter(v => v != null && Number.isFinite(Number(v)));
+  if (!vals.length) return null;
+  return vals.reduce((sum, v) => sum + Number(v), 0) / vals.length;
+}
+
 function FilterBar({ filter, setFilter }) {
   const segs = [
   { v: 'all', label: '全部', count: 48 },
@@ -48,6 +90,7 @@ function FilterBar({ filter, setFilter }) {
 function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = null, setRoute, openRules, openCreatePO }) {
   const [filter, setFilter] = React.useState(initialFilter);
   const [keyword, setKeyword] = React.useState(initialKeyword);
+  const [sort, setSort] = React.useState({ key: 'priority', dir: 'asc' });
   // 顶部 + 高级筛选 state
   const [storeFilter, setStoreFilter] = React.useState(initialMallId ? String(initialMallId) : null);     // mall_id 字符串
   const [countryFilter, setCountryFilter] = React.useState(null); // country code
@@ -68,7 +111,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     if (filter === 'p3') rows = rows.filter((s) => s.priority === 'p3');else
     if (filter === 'safe') rows = rows.filter((s) => s.priority === 'safe');else
     if (filter === 'suggest') rows = rows.filter((s) => s.suggest);else
-    if (filter === 'stockout7') rows = rows.filter((s) => s.fbaSellable <= 7);
+    if (filter === 'stockout7') rows = rows.filter(isStockout7Sku);
 
     if (keyword.trim()) {
       const kw = keyword.trim().toLowerCase();
@@ -94,6 +137,41 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     return rows;
   }, [filter, keyword, storeFilter, countryFilter, ownerFilter, suggestOnly, statusFilter, sellableBucket, brandFilter, categoryFilter]);
 
+  const sorted = React.useMemo(() => {
+    const rows = [...filtered];
+    const getter = LIST_SORT_ACCESSORS[sort.key] || LIST_SORT_ACCESSORS.priority;
+    const dir = sort.dir === 'desc' ? -1 : 1;
+    rows.sort((a, b) => {
+      const av = getter(a);
+      const bv = getter(b);
+      const aEmpty = av == null || av === '';
+      const bEmpty = bv == null || bv === '';
+      if (aEmpty && bEmpty) return 0;
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return String(av).localeCompare(String(bv), 'zh-Hans-CN') * dir;
+      }
+      return (Number(av) - Number(bv)) * dir;
+    });
+    return rows;
+  }, [filtered, sort]);
+
+  const totals = React.useMemo(() => ({
+    sales7d: sumBy(filtered, s => s.sales7d ?? (s.recent7 || []).reduce((a, b) => a + b, 0)),
+    futureDaily: sumBy(filtered, s => s.futureDaily),
+    revenue7: sumBy(filtered, s => s.revenue7),
+    grossMarginAvg: avgBy(filtered, s => s.grossMargin),
+    fbaAvail: sumBy(filtered, s => s.fbaAvail),
+    fbaInTransit: sumBy(filtered, s => s.fbaInTransit),
+    localTotal: sumBy(filtered, s => s.localTotal),
+    localPlan: sumBy(filtered, s => s.localPlan),
+    totalStock: sumBy(filtered, s => s.totalStock),
+    sellableAvg: avgBy(filtered, s => s.sellable),
+    purchaseLeadTimeAvg: avgBy(filtered, s => s.purchaseLeadTime),
+    suggestQty: sumBy(filtered, s => s.suggest ? s.suggestQty : 0),
+  }), [filtered]);
+
   const clearAdvFilters = React.useCallback(() => {
     setKeyword('');
     setStoreFilter(null);
@@ -114,6 +192,45 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);else next.add(id);
     setSelected(next);
+  };
+
+  const setSortKey = (key) => {
+    setSort(cur => cur.key === key
+      ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: key === 'priority' ? 'asc' : 'desc' }
+    );
+  };
+
+  const SortTh = ({ id, children, className, style }) => {
+    const active = sort.key === id;
+    return (
+      <th className={className} style={style}>
+        <button
+          type="button"
+          onClick={() => setSortKey(id)}
+          title="点击排序"
+          style={{
+            appearance: 'none',
+            border: 0,
+            background: 'transparent',
+            color: 'inherit',
+            font: 'inherit',
+            fontWeight: 'inherit',
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            cursor: 'pointer',
+            justifyContent: className === 'num' ? 'flex-end' : 'flex-start',
+            width: className === 'num' ? '100%' : 'auto',
+          }}>
+          <span>{children}</span>
+          <span style={{ fontSize: 10, color: active ? 'var(--accent)' : 'var(--text-4)' }}>
+            {active ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}
+          </span>
+        </button>
+      </th>
+    );
   };
 
   return (
@@ -255,33 +372,33 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
               <th style={{ width: 36, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 3, boxShadow: '1px 0 0 var(--border)' }}>
                 <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleAll} />
               </th>
-              <th style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 3, minWidth: 280, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>商品</th>
-              <th>店铺/国家</th>
-              <th>状态</th>
-              <th>风险</th>
-              <th className="num">近 7 天销量</th>
-              <th className="num">预测日销</th>
-              <th className="num">收入</th>
-              <th className="num">毛利率</th>
-              <th className="num">FBA 可用</th>
-              <th className="num">FBA 在途</th>
-              <th className="num">本地库存</th>
-              <th className="num">本地在途</th>
-              <th className="num">总库存</th>
-              <th className="num">可售天数</th>
-              <th>预计断货</th>
-              <th>上次发货</th>
-              <th>上次采购</th>
-              <th className="num">采购时效</th>
-              <th>建议采购</th>
-              <th className="num">建议采购量</th>
-              <th>建议采购时间</th>
-              <th>最后更新</th>
+	              <SortTh id="product" style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 3, minWidth: 280, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>商品</SortTh>
+	              <SortTh id="store">店铺/国家</SortTh>
+	              <SortTh id="status">状态</SortTh>
+	              <SortTh id="priority">风险</SortTh>
+	              <SortTh id="sales7d" className="num">近 7 天销量</SortTh>
+	              <SortTh id="futureDaily" className="num">预测日销</SortTh>
+	              <SortTh id="revenue7" className="num">收入</SortTh>
+	              <SortTh id="grossMargin" className="num">毛利率</SortTh>
+	              <SortTh id="fbaAvail" className="num">FBA 可用</SortTh>
+	              <SortTh id="fbaInTransit" className="num">FBA 在途</SortTh>
+	              <SortTh id="localTotal" className="num">本地库存</SortTh>
+	              <SortTh id="localPlan" className="num">本地在途</SortTh>
+	              <SortTh id="totalStock" className="num">总库存</SortTh>
+	              <SortTh id="sellable" className="num">可售天数</SortTh>
+	              <SortTh id="stockoutDate">预计断货</SortTh>
+	              <SortTh id="lastShipmentAt">上次发货</SortTh>
+	              <SortTh id="lastPurchaseAt">上次采购</SortTh>
+	              <SortTh id="purchaseLeadTime" className="num">采购时效</SortTh>
+	              <SortTh id="suggest">建议采购</SortTh>
+	              <SortTh id="suggestQty" className="num">建议采购量</SortTh>
+	              <SortTh id="purchaseDate">建议采购时间</SortTh>
+	              <SortTh id="lastUpdated">最后更新</SortTh>
               <th style={{ position: 'sticky', right: 0, background: 'var(--surface)', zIndex: 3, width: 80 }}>操作</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s) => {
+	            {sorted.map((s) => {
               const sel = selected.has(s.id);
               return (
                 <tr key={s.id} className={sel ? 'selected' : ''}
@@ -356,9 +473,37 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                   </td>
                 </tr>);
 
-            })}
-          </tbody>
-        </table>
+	            })}
+	          </tbody>
+	          <tfoot>
+	            <tr>
+	              <td style={{ position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 2, boxShadow: '1px 0 0 var(--border)' }} />
+	              <td style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 2, fontWeight: 600, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>合计 · {filtered.length}</td>
+	              <td />
+	              <td />
+	              <td />
+	              <td className="num tabular">{fmt.num(totals.sales7d)}</td>
+	              <td className="num tabular">{fmt.num(+totals.futureDaily.toFixed(2))}</td>
+	              <td className="num tabular">{fmt.money(+totals.revenue7.toFixed(2))}</td>
+	              <td className="num tabular">{totals.grossMarginAvg == null ? '—' : '均 ' + fmt.pct(totals.grossMarginAvg)}</td>
+	              <td className="num tabular">{fmt.num(totals.fbaAvail)}</td>
+	              <td className="num tabular">{fmt.num(totals.fbaInTransit)}</td>
+	              <td className="num tabular">{fmt.num(totals.localTotal)}</td>
+	              <td className="num tabular">{fmt.num(totals.localPlan)}</td>
+	              <td className="num tabular">{fmt.num(totals.totalStock)}</td>
+	              <td className="num tabular">{totals.sellableAvg == null ? '—' : '均 ' + totals.sellableAvg.toFixed(1) + ' 天'}</td>
+	              <td />
+	              <td />
+	              <td />
+	              <td className="num tabular">{totals.purchaseLeadTimeAvg == null ? '—' : '均 ' + totals.purchaseLeadTimeAvg.toFixed(0) + 'd'}</td>
+	              <td />
+	              <td className="num tabular">{fmt.num(totals.suggestQty)}</td>
+	              <td />
+	              <td />
+	              <td style={{ position: 'sticky', right: 0, background: 'var(--surface)', zIndex: 2 }} />
+	            </tr>
+	          </tfoot>
+	        </table>
       </div>
 
       {/* Footer / pagination */}
@@ -372,8 +517,10 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
       }}>
         <span>共 {filtered.length} 条</span>
         <span>·</span>
-        <span>已选 {selected.size}</span>
-        <div style={{ flex: 1 }} />
+	        <span>已选 {selected.size}</span>
+	        <span>·</span>
+	        <span>当前排序：{sort.key} {sort.dir === 'asc' ? '升序' : '降序'}</span>
+	        <div style={{ flex: 1 }} />
         <span>每页</span>
         <select className="sel" style={{ height: 26, padding: '0 8px' }}><option>50</option><option>100</option></select>
         <button className="btn sm ghost icon" disabled><Icon name="chevron-left" size={13} /></button>
