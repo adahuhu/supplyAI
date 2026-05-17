@@ -15,10 +15,14 @@ from supplyai.repositories.sku_repo import SkuRepository
 from supplyai.schemas.ai import (
     ChatRequest,
     ChatResponseMessage,
+    DecisionCardRequest,
+    DecisionCardResponse,
     ExplainRequest,
     ExplainResponse,
+    SmartDecisionRequest,
 )
 from supplyai.services.ai_service import AiService
+from supplyai.services.smart_decision_service import SmartDecisionService
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -81,6 +85,15 @@ async def ai_chat(
     return out
 
 
+@router.post("/decision-card", response_model=DecisionCardResponse)
+async def ai_decision_card(
+    req: DecisionCardRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> DecisionCardResponse:
+    """结构化决策卡片 — 后端真实链路生成,前端不做本地业务推理."""
+    return await _build_service(session).decision_card(req)
+
+
 @router.post("/chat/stream")
 async def ai_chat_stream(
     req: ChatRequest,
@@ -121,4 +134,36 @@ async def ai_chat_stream(
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",  # 关掉 nginx buffering
         },
+    )
+
+
+def _build_smart_service(session: AsyncSession) -> SmartDecisionService:
+    return SmartDecisionService(
+        ai_client=get_ai_client(),
+        ai_service=_build_service(session),
+    )
+
+
+@router.post("/smart-decision/stream")
+async def ai_smart_decision_stream(
+    req: SmartDecisionRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+):
+    """Smart Decision — 分类 + 卡片 + LLM 解释 统一 SSE 流."""
+    svc = _build_smart_service(session)
+
+    async def event_gen():
+        try:
+            async for event in svc.stream(req):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                pass
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
