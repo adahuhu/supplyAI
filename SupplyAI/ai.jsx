@@ -1065,10 +1065,11 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
       }
 
       let explanationStarted = false;
+      let cardSeen = false;
       const startExplanationBubble = () => {
         if (!explanationStarted) {
           explanationStarted = true;
-          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
+          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true, explain: cardSeen }]);
         }
       };
       const appendDelta = (delta) => {
@@ -1097,6 +1098,7 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
           setToolStatus(SCENARIO_LABEL[ev.scenario] || ev.scenario);
         } else if (ev.type === 'card') {
           setToolStatus('');
+          cardSeen = true;
           setHistory(h => [...h, { role: 'ai', text: ev.summary, card: ev.card }]);
         } else if (ev.type === 'reasoning_delta') {
           startExplanationBubble();
@@ -1154,26 +1156,27 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
                     active={!!m.streaming && !m.text}
                   />
                 )}
-                {m.text && (
-                  <StructuredAICard
-                    card={m.card}
-                    text={m.text}
-                    setRoute={setRoute}
-                    openCreatePO={openCreatePO}
-                    openRules={openRules}
-                    onClose={onClose}
-                    onAction={sendToBackend}
-                    onCreatePlan={(advice) => {
-                      const target = (window.SKUS || []).find((s) => {
-                        if (!advice.msku || s.msku !== advice.msku) return false;
-                        return !advice.country || (s.country && s.country.code === advice.country);
-                      });
-                      if (openCreatePO) openCreatePO(target ? [{ id: target.id, qty: advice.suggestQty, supplier: advice.supplierConfirm }] : []);
-                      onClose && onClose();
-                    }}
-                    refreshData={refreshData}
-                    showToast={showToast}
-                  />
+                {m.text && (m.explain
+                  ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                  : <StructuredAICard
+                      card={m.card}
+                      text={m.text}
+                      setRoute={setRoute}
+                      openCreatePO={openCreatePO}
+                      openRules={openRules}
+                      onClose={onClose}
+                      onAction={sendToBackend}
+                      onCreatePlan={(advice) => {
+                        const target = (window.SKUS || []).find((s) => {
+                          if (!advice.msku || s.msku !== advice.msku) return false;
+                          return !advice.country || (s.country && s.country.code === advice.country);
+                        });
+                        if (openCreatePO) openCreatePO(target ? [{ id: target.id, qty: advice.suggestQty, supplier: advice.supplierConfirm }] : []);
+                        onClose && onClose();
+                      }}
+                      refreshData={refreshData}
+                      showToast={showToast}
+                    />
                 )}
               </AIBubble>
             )
@@ -1297,10 +1300,11 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
       };
 
       let explanationStarted = false;
+      let cardSeen = false;
       const startExplanationBubble = () => {
         if (!explanationStarted) {
           explanationStarted = true;
-          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
+          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true, explain: cardSeen }]);
         }
       };
       const appendDelta = (delta) => {
@@ -1329,6 +1333,7 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
           setToolStatus(SCENARIO_LABEL[ev.scenario] || ev.scenario);
         } else if (ev.type === 'card') {
           setToolStatus('');
+          cardSeen = true;
           setHistory(h => [...h, { role: 'ai', text: ev.summary, card: ev.card }]);
         } else if (ev.type === 'reasoning_delta') {
           startExplanationBubble();
@@ -1400,22 +1405,23 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
                     active={!!m.streaming && !m.text}
                   />
                 )}
-                {m.text && (
-                  <StructuredAICard
-                    card={m.card}
-                    text={m.text}
-                    sku={sku}
-                    openCreatePO={openCreatePO}
-                    openRules={openRules}
-                    onClose={onClose}
-                    onAction={sendToBackend}
-                    onCreatePlan={(advice) => {
-                      if (openCreatePO) openCreatePO([{ id: sku.id, qty: advice.suggestQty, supplier: advice.supplierConfirm }]);
-                      onClose && onClose();
-                    }}
-                    refreshData={refreshData}
-                    showToast={showToast}
-                  />
+                {m.text && (m.explain
+                  ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                  : <StructuredAICard
+                      card={m.card}
+                      text={m.text}
+                      sku={sku}
+                      openCreatePO={openCreatePO}
+                      openRules={openRules}
+                      onClose={onClose}
+                      onAction={sendToBackend}
+                      onCreatePlan={(advice) => {
+                        if (openCreatePO) openCreatePO([{ id: sku.id, qty: advice.suggestQty, supplier: advice.supplierConfirm }]);
+                        onClose && onClose();
+                      }}
+                      refreshData={refreshData}
+                      showToast={showToast}
+                    />
                 )}
               </AIBubble>
             )
