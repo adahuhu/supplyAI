@@ -179,9 +179,9 @@ def test_b_us_1_2_sidebar_navigation_works(page: Page) -> None:
     page.get_by_role("button", name="备货计划").click()
     expect(page.locator("h1, .h1").filter(has_text="备货计划")).to_be_visible()
 
-    # 点"采购草稿"
-    page.get_by_role("button", name="采购草稿").click()
-    expect(page.locator("h1, .h1").filter(has_text="采购草稿")).to_be_visible()
+    # 点"采购计划"(exact 避免匹配列表行中的"生成采购计划"按钮)
+    page.get_by_role("button", name="采购计划", exact=True).click()
+    expect(page.get_by_text("创建采购计划").first).to_be_visible()
 
     # 回工作台
     page.get_by_role("button", name="工作台").click()
@@ -284,6 +284,28 @@ def test_b_us_4_1_error_page_shown_when_backend_unreachable(page: Page) -> None:
     # ConnectionError 卡片
     expect(page.get_by_text("无法连接后端")).to_be_visible(timeout=15_000)
     expect(page.get_by_role("button", name="重试")).to_be_visible()
+
+
+# ════════════════════════════════════════════════════════
+# Browser Epic 5.5 — Smart Decision 卡片(全局 AI)
+# ════════════════════════════════════════════════════════
+
+
+def test_b_us_5_5_smart_decision_card_renders_in_global_ai(page: Page) -> None:
+    """B-US-5.5: 全局 AI 输入场景问题,应通过 smart-decision 渲染决策卡片."""
+    _wait_for_online(page)
+
+    # 打开全局 AI
+    page.keyboard.press("Meta+j")
+    expect(page.get_by_text("补货决策")).to_be_visible(timeout=10_000)
+
+    # 输入场景问题
+    input_el = page.locator("textarea").last
+    input_el.fill("哪些SKU必须补货")
+    input_el.press("Enter")
+
+    # 等待卡片渲染(风险分布)
+    expect(page.get_by_text("风险分布")).to_be_visible(timeout=30_000)
 
 
 # ════════════════════════════════════════════════════════
