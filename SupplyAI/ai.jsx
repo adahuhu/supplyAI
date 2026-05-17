@@ -458,243 +458,6 @@ function AIDecisionCard({ text, sku, onAction, onCreatePlan }) {
   );
 }
 
-function aiSkus() {
-  if (Array.isArray(window.SKUS)) return window.SKUS;
-  if (typeof SKUS !== 'undefined' && Array.isArray(SKUS)) return SKUS;
-  return [];
-}
-
-function aiStats() {
-  if (window.DASH_STATS) return window.DASH_STATS;
-  if (typeof DASH_STATS !== 'undefined') return DASH_STATS;
-  return {};
-}
-
-function aiHolidays() {
-  if (Array.isArray(window.HOLIDAYS_DATA)) return window.HOLIDAYS_DATA;
-  return [];
-}
-
-function aiPriorityRank(level) {
-  return ({ p1: 0, p2: 1, p3: 2, safe: 3 })[String(level || '').toLowerCase()] ?? 9;
-}
-
-function aiParseDate(v) {
-  if (!v) return null;
-  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
-  const d = new Date(String(v).slice(0, 10) + 'T00:00:00');
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function aiDaysUntil(date, asOf) {
-  const d = aiParseDate(date);
-  if (!d) return null;
-  const base = asOf instanceof Date && !Number.isNaN(asOf.getTime()) ? asOf : new Date();
-  const a = new Date(base.getFullYear(), base.getMonth(), base.getDate()).getTime();
-  const b = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  return Math.round((b - a) / 86400000);
-}
-
-function aiHolidayName(h) {
-  const table = {
-    mothers_day: '母亲节',
-    'Mothers Day': '母亲节',
-    "Mother's Day": '母亲节',
-    prime_day: 'Prime Day',
-    black_friday: '黑五',
-    cyber_monday: '网一',
-    christmas: '圣诞节',
-    new_year: '新年',
-  };
-  return h ? (table[h.name] || h.name || '大促') : '大促';
-}
-
-function aiNextHoliday() {
-  const stats = aiStats();
-  const asOf = stats.asOf instanceof Date ? stats.asOf : new Date(stats.asOf || Date.now());
-  const todayStart = new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate()).getTime();
-  return aiHolidays()
-    .map(h => ({ ...h, peakDate: aiParseDate(h.peak || h.peakDate || h.peak_date) }))
-    .filter(h => h.peakDate && h.peakDate.getTime() >= todayStart)
-    .sort((a, b) => a.peakDate - b.peakDate)[0] || null;
-}
-
-function aiHolidayRelatedSkus(holiday) {
-  if (!holiday) return [];
-  const countryCode = holiday.countryCode || holiday.country_code || null;
-  return aiSkus()
-    .filter(s => !countryCode || s.country?.code === countryCode)
-    .filter(s => s.suggest || s.priority === 'p1' || s.priority === 'p2')
-    .sort((a, b) => aiPriorityRank(a.priority) - aiPriorityRank(b.priority)
-      || (a.stockoutDate?.getTime?.() || 0) - (b.stockoutDate?.getTime?.() || 0));
-}
-
-function aiPrimaryRiskSku() {
-  return aiSkus()
-    .filter(s => s.suggest || s.priority === 'p1')
-    .sort((a, b) => aiPriorityRank(a.priority) - aiPriorityRank(b.priority)
-      || (a.stockoutDate?.getTime?.() || 0) - (b.stockoutDate?.getTime?.() || 0))[0]
-    || aiSkus()[0]
-    || null;
-}
-
-function aiAddDays(base, days) {
-  const d = base instanceof Date && !Number.isNaN(base.getTime()) ? new Date(base) : new Date();
-  d.setDate(d.getDate() + Number(days || 0));
-  return d;
-}
-
-function buildRiskQueueCard() {
-  const stats = aiStats();
-  const rows = aiSkus()
-    .filter(s => ['p1', 'p2', 'p3'].includes(String(s.priority || '').toLowerCase()))
-    .sort((a, b) => aiPriorityRank(a.priority) - aiPriorityRank(b.priority)
-      || (a.stockoutDate?.getTime?.() || 0) - (b.stockoutDate?.getTime?.() || 0))
-    .slice(0, 6);
-  const suggestedRows = rows.filter(s => s.suggest);
-  const totalQty = suggestedRows.reduce((sum, s) => sum + Number(s.suggestQty || 0), 0);
-  return {
-    type: 'risk_queue',
-    severity: 'p1',
-    title: '高风险 SKU 队列',
-    summary: `当前 ${stats.counts?.p1 || 0} 个 P1，优先处理预计断货最近的 SKU。`,
-    metrics: [
-      { label: 'P1 紧急', value: stats.counts?.p1 || 0, unit: '个' },
-      { label: '7 天内断货', value: stats.stockout7 || 0, unit: '个' },
-      { label: '建议采购', value: totalQty || stats.suggestTotalQty || 0, unit: '件' },
-      { label: '预计采购额', value: stats.suggestTotalAmountBase || null, currency: 'USD' },
-    ],
-    riskCounts: stats.counts || {},
-    rows,
-    actionItems: suggestedRows.slice(0, 50).map(s => ({ id: s.id, qty: s.suggestQty })),
-  };
-}
-
-function buildPlanComparisonCard() {
-  const stats = aiStats();
-  const sku = aiPrimaryRiskSku();
-  const qty = Number(sku?.suggestQty || 0);
-  const unitCost = Number(sku?.cost || 0);
-  const baseAmount = Number(sku?.suggestAmountBase || sku?.suggestAmount || (unitCost ? unitCost * qty : 0));
-  const asOf = stats.asOf instanceof Date ? stats.asOf : new Date(stats.asOf || Date.now());
-  const sellableDays = Number(sku?.fbaSellable || 0);
-  const options = [
-    { key: 'sea', name: '海运', etaDays: 35, costFactor: 1.00, risk: '高', note: '成本最低，但无法覆盖断货窗口' },
-    { key: 'air', name: '空运', etaDays: 7, costFactor: 1.80, risk: sellableDays < 7 ? '中' : '低', note: '最快到货，适合首批救急' },
-    { key: 'hybrid', name: '海空混合', etaDays: 10, costFactor: 1.35, risk: sellableDays < 10 ? '中' : '低', note: '成本和断货风险更均衡', recommended: true },
-  ].map(o => ({
-    ...o,
-    arrivalDate: aiAddDays(asOf, o.etaDays),
-    amount: baseAmount ? baseAmount * o.costFactor : null,
-    gapDays: Math.max(0, o.etaDays - sellableDays),
-  }));
-  const recommended = options.find(o => o.recommended) || options[0];
-  return {
-    type: 'plan_comparison',
-    severity: 'p2',
-    title: `${sku?.msku || '高风险 SKU'} 运输方案对比`,
-    sku,
-    recommended,
-    metrics: [
-      { label: '推荐方案', value: recommended.name },
-      { label: '首批到货', value: recommended.etaDays, unit: '天' },
-      { label: '缺货窗口', value: adviceFormatFlexible(recommended.gapDays), unit: '天' },
-      { label: '建议采购', value: qty, unit: '件' },
-    ],
-    evidence: [
-      { label: 'FBA 可售', value: `${adviceFormatFlexible(sellableDays)} 天` },
-      { label: '预计断货', value: sku?.stockoutDate ? fmt.dateLong(sku.stockoutDate) : '—' },
-      { label: '当前总库存', value: `${adviceFormatFlexible(sku?.totalStock)} 件` },
-      { label: '覆盖需求', value: `${adviceFormatFlexible(sku?.coverageDemand)} 件` },
-    ],
-    options,
-    actionItems: sku ? [{ id: sku.id, qty }] : [],
-  };
-}
-
-function buildHolidayReadinessCard() {
-  const stats = aiStats();
-  const holiday = aiNextHoliday();
-  const rows = aiHolidayRelatedSkus(holiday).slice(0, 6);
-  const multiplier = Number(holiday?.dm || holiday?.sales_multiplier || 1);
-  const baseDemand = rows.reduce((sum, s) => sum + Number(s.coverageDemand || 0), 0);
-  const promoDemand = baseDemand * multiplier;
-  const totalStock = rows.reduce((sum, s) => sum + Number(s.totalStock || 0), 0);
-  const gap = Math.max(0, promoDemand - totalStock);
-  const suggestQty = rows.filter(s => s.suggest).reduce((sum, s) => sum + Number(s.suggestQty || 0), 0);
-  const d = aiDaysUntil(holiday?.peakDate, stats.asOf);
-  return {
-    type: 'holiday_readiness',
-    severity: d != null && d <= 14 ? 'p2' : 'p3',
-    title: holiday ? `${holiday.flag || ''} ${aiHolidayName(holiday)}` : '大促备货',
-    summary: holiday
-      ? `${aiHolidayName(holiday)} 距离 ${d == null ? '—' : `${Math.max(0, d)} 天`}，当前关联 ${rows.length} 个风险 SKU。`
-      : '当前暂无已配置的大促节点。',
-    holiday,
-    metrics: [
-      { label: '倒计时', value: d == null ? '—' : Math.max(0, d), unit: d == null ? '' : '天' },
-      { label: '关联 SKU', value: rows.length, unit: '个' },
-      { label: '销量系数', value: multiplier.toFixed(2).replace(/\.00$/, ''), prefix: '×' },
-      { label: '建议采购', value: suggestQty || Math.ceil(gap), unit: '件' },
-    ],
-    evidence: [
-      { label: '活动覆盖需求', value: `${adviceFormatFlexible(promoDemand)} 件` },
-      { label: '当前总库存', value: `${adviceFormatFlexible(totalStock)} 件` },
-      { label: '活动缺口', value: `${adviceFormatFlexible(gap)} 件` },
-      { label: '峰值日期', value: holiday?.peakDate ? fmt.dateLong(holiday.peakDate) : '—' },
-    ],
-    rows,
-    actionItems: rows.filter(s => s.suggest).slice(0, 50).map(s => ({ id: s.id, qty: s.suggestQty })),
-  };
-}
-
-function buildRuleImpactCard() {
-  const sku = aiPrimaryRiskSku();
-  const rows = aiSkus()
-    .filter(s => s.suggest || s.priority === 'p1' || s.priority === 'p2')
-    .sort((a, b) => aiPriorityRank(a.priority) - aiPriorityRank(b.priority)
-      || (a.stockoutDate?.getTime?.() || 0) - (b.stockoutDate?.getTime?.() || 0))
-    .slice(0, 5)
-    .map(s => {
-      const currentSafeDays = Number(s.safeDays || 14);
-      const targetSafeDays = 21;
-      const lead = Number(s.purchaseLeadTime || 0);
-      const daily = Number(s.futureDaily || 0);
-      const totalStock = Number(s.totalStock || 0);
-      const nextCoverageDemand = daily * (lead + targetSafeDays);
-      const nextSuggestQty = Math.ceil(Math.max(0, nextCoverageDemand - totalStock));
-      const currentSuggestQty = Number(s.suggestQty || 0);
-      return {
-        ...s,
-        currentSafeDays,
-        targetSafeDays,
-        nextCoverageDemand,
-        nextSuggestQty,
-        qtyDelta: nextSuggestQty - currentSuggestQty,
-      };
-    });
-  const target = rows.find(s => s.id === sku?.id) || rows[0] || null;
-  const totalDelta = rows.reduce((sum, s) => sum + Math.max(0, s.qtyDelta), 0);
-  return {
-    type: 'rule_impact',
-    severity: 'p3',
-    title: '安全天数 21 天规则模拟',
-    sku: target,
-    metrics: [
-      { label: '安全天数', value: `${target?.currentSafeDays ?? 14} → 21`, unit: '天' },
-      { label: '采购量变化', value: totalDelta >= 0 ? `+${adviceFormatNum(totalDelta)}` : adviceFormatNum(totalDelta), unit: '件' },
-      { label: '影响 SKU', value: rows.length, unit: '个' },
-      { label: '主 SKU 新采购', value: target?.nextSuggestQty || 0, unit: '件' },
-    ],
-    evidence: [
-      { label: '主 SKU', value: target?.msku || '—' },
-      { label: '未来日销', value: `${adviceFormatFlexible(target?.futureDaily)} 件/天` },
-      { label: '覆盖需求', value: `${adviceFormatFlexible(target?.coverageDemand)} → ${adviceFormatFlexible(target?.nextCoverageDemand)} 件` },
-      { label: '风险等级', value: `${String(target?.priority || '').toUpperCase()} · 需复算确认` },
-    ],
-    rows,
-  };
-}
 
 function MetricGrid({ items }) {
   return (
@@ -947,7 +710,51 @@ function PlanComparisonCard({ card, setRoute, openCreatePO, onClose }) {
   );
 }
 
-function RuleImpactCard({ card, setRoute, openRules, onClose }) {
+function RuleImpactCard({ card, setRoute, openRules, onClose, refreshData, showToast }) {
+  const [applying, setApplying] = React.useState(false);
+  const targetSafeDays = Number(card.targetSafeDays || card.sku?.targetSafeDays || 21);
+  const mainSku = card.sku || card.rows?.[0] || null;
+  const isGlobalScope = card.scope === 'global';
+  const applyRuleAndRecalc = async () => {
+    if (!window.api || !mainSku) return;
+    setApplying(true);
+    try {
+      const mallId = mainSku.mall_id ?? mainSku.mallId ?? null;
+      const msku = mainSku.msku;
+      const existingResp = await window.api.rulesList({
+        scope_types: ['sku'],
+        mall_id: mallId,
+        msku,
+        enabled_only: true,
+        page_size: 1,
+      }).catch(() => null);
+      const existing = existingResp?.rows?.[0] || null;
+      const leadFallback = Number(mainSku.purchaseLeadTime || 0);
+      await window.api.rulesUpsert({
+        rule_id: existing?.rule_id || undefined,
+        scope_type: 'sku',
+        mall_id: mallId,
+        msku,
+        safety_days: targetSafeDays,
+        purchase_duration_days: existing?.purchase_duration_days ?? leadFallback,
+        delivery_days: existing?.delivery_days ?? 0,
+        qc_days: existing?.qc_days ?? 0,
+        enabled: true,
+        updated_by: 'ai-assistant',
+      });
+      await window.api.calcRun({ run_type: 'rule_changed' });
+      if (refreshData) await refreshData();
+      else if (window.refreshSupplyAI) await window.refreshSupplyAI();
+      if (showToast) showToast(isGlobalScope
+        ? `已应用到主 SKU 并重新计算`
+        : `已应用安全天数 ${targetSafeDays} 天并重新计算`);
+    } catch (err) {
+      if (showToast) showToast('规则应用失败:' + err.message);
+    } finally {
+      setApplying(false);
+    }
+  };
+  const changeLabel = card.actionText || (targetSafeDays > Number(mainSku?.currentSafeDays || 14) ? '提高' : targetSafeDays < Number(mainSku?.currentSafeDays || 14) ? '降低' : '保持');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12.5 }}>
       <div style={{
@@ -959,13 +766,13 @@ function RuleImpactCard({ card, setRoute, openRules, onClose }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <Icon name="settings" size={14} color="var(--p3-strong)"/>
-          <span style={{ fontWeight: 700 }}>规则模拟 · {card.title}</span>
+          <span style={{ fontWeight: 700 }}>规则影响 · {card.title}</span>
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.45 }}>
-          安全天数提高到 21 天后，建议采购量将增加。
+          安全天数{changeLabel}到 {targetSafeDays} 天后，建议采购量将随覆盖周期同步变化。
         </div>
         <div style={{ color: 'var(--text-3)', lineHeight: 1.55, marginTop: 5 }}>
-          该模拟只展示影响预估，保存规则前仍需要重新计算确认。
+          当前为后端基于最新计算批次的影响预览；点击应用后会保存规则并触发重新计算。
         </div>
       </div>
       <MetricGrid items={card.metrics}/>
@@ -1007,8 +814,11 @@ function RuleImpactCard({ card, setRoute, openRules, onClose }) {
           if (setRoute) setRoute({ page: 'list', filter: 'suggest' });
           if (onClose) onClose();
         }}>查看影响 SKU</button>
+        <button className="btn sm" onClick={applyRuleAndRecalc} disabled={applying || !mainSku}>
+          {applying ? '重新计算中…' : (isGlobalScope && card.rows?.length > 1 ? '应用到主 SKU 并重新计算' : `应用 ${targetSafeDays} 天并重新计算`)}
+        </button>
         <button className="btn primary sm" onClick={() => {
-          if (openRules) openRules({ sku: card.sku, mode: 'forecast' });
+          if (openRules) openRules({ sku: card.sku, mode: 'replenish' });
           if (onClose) onClose();
         }}>打开规则设置</button>
       </div>
@@ -1016,16 +826,76 @@ function RuleImpactCard({ card, setRoute, openRules, onClose }) {
   );
 }
 
-function StructuredAICard({ card, text, sku, setRoute, openCreatePO, openRules, onClose, onAction, onCreatePlan }) {
-  const built = card?.type === 'risk_queue' && !card.rows ? buildRiskQueueCard()
-    : card?.type === 'holiday_readiness' && !card.rows ? buildHolidayReadinessCard()
-    : card?.type === 'plan_comparison' && !card.options ? buildPlanComparisonCard()
-    : card?.type === 'rule_impact' && !card.rows ? buildRuleImpactCard()
-    : card;
+function BackendDecisionCard({ card, sku, setRoute, openCreatePO, openRules, onClose, onAction, onCreatePlan, refreshData, showToast }) {
+  const [state, setState] = React.useState({ loading: true, error: '', payload: null });
+  React.useEffect(() => {
+    let cancelled = false;
+    const context = { ...(card.context || {}) };
+    if (sku && !context.listing_id) {
+      context.listing_id = sku.listingId || sku.id;
+      context.mall_id = sku.mallId || sku.mall_id || null;
+      context.msku = sku.msku;
+      context.country_code = sku.country?.code;
+    }
+    window.api.aiDecisionCard(card.scenario, context)
+      .then(payload => {
+        if (!cancelled) setState({ loading: false, error: '', payload });
+      })
+      .catch(err => {
+        if (!cancelled) setState({ loading: false, error: err.message, payload: null });
+      });
+    return () => { cancelled = true; };
+  }, [card.scenario, JSON.stringify(card.context || {}), sku?.listingId]);
+  if (state.loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 12 }}>
+        <span className="pulse">●</span>
+        正在通过后端真实链路生成决策卡片…
+      </div>
+    );
+  }
+  if (state.error) {
+    return <div style={{ color: 'var(--p1)', fontSize: 12 }}>⚠️ 决策卡片生成失败:{state.error}</div>;
+  }
+  return (
+    <StructuredAICard
+      card={state.payload?.card}
+      text={state.payload?.content || ''}
+      sku={sku}
+      setRoute={setRoute}
+      openCreatePO={openCreatePO}
+      openRules={openRules}
+      onClose={onClose}
+      onAction={onAction}
+      onCreatePlan={onCreatePlan}
+      refreshData={refreshData}
+      showToast={showToast}
+    />
+  );
+}
+
+function StructuredAICard({ card, text, sku, setRoute, openCreatePO, openRules, onClose, onAction, onCreatePlan, refreshData, showToast }) {
+  const built = card;
+  if (built?.type === 'backend_decision') {
+    return (
+      <BackendDecisionCard
+        card={built}
+        sku={sku}
+        setRoute={setRoute}
+        openCreatePO={openCreatePO}
+        openRules={openRules}
+        onClose={onClose}
+        onAction={onAction}
+        onCreatePlan={onCreatePlan}
+        refreshData={refreshData}
+        showToast={showToast}
+      />
+    );
+  }
   if (built?.type === 'risk_queue') return <RiskQueueCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
   if (built?.type === 'holiday_readiness') return <HolidayReadinessCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
   if (built?.type === 'plan_comparison') return <PlanComparisonCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
-  if (built?.type === 'rule_impact') return <RuleImpactCard card={built} setRoute={setRoute} openRules={openRules} onClose={onClose}/>;
+  if (built?.type === 'rule_impact') return <RuleImpactCard card={built} setRoute={setRoute} openRules={openRules} onClose={onClose} refreshData={refreshData} showToast={showToast}/>;
   return <AIDecisionCard text={text} sku={sku} onAction={onAction} onCreatePlan={onCreatePlan}/>;
 }
 
@@ -1101,6 +971,15 @@ function AIInput({ placeholder = '问我：今天哪些 SKU 必须补货？', on
   );
 }
 
+// 场景名 → 中文标签(用于 classify 事件占位)
+const SCENARIO_LABEL = {
+  risk_queue: '高风险队列',
+  holiday_readiness: '大促备货',
+  plan_comparison: '方案对比',
+  rule_impact: '规则影响',
+  single_sku_replenishment: '单SKU补货',
+};
+
 // 工具名 → 中文标签(用于流式 thinking 占位)
 const TOOL_LABEL = {
   query_skus: '查询 SKU 列表',
@@ -1120,37 +999,9 @@ const GLOBAL_AI_QUESTIONS = [
   { tag: '大促备货', q: '下一个大促要为哪些 SKU 备货?缺口和建议采购量是多少?' },
   { tag: '单 SKU 补货', q: '挑一个高风险 SKU,告诉我还能卖多久,要不要补、补多少?' },
   { tag: '方案对比', q: '只海运 vs 海+空混合,成本和断货风险分别是什么?' },
-  { tag: '规则模拟', q: '安全天数改成 21 天会怎样?采购量和风险等级有什么变化?' },
+  { tag: '规则影响', q: '安全天数改成 21 天会怎样?采购量和风险等级有什么变化?' },
 ];
 
-function localCardForQuestion(text) {
-  if (/挑一个|单\s*SKU|单品|一个高风险/.test(text)) return null;
-  if (/方案对比|海运|空运|海空|海\+空|混合/.test(text)) {
-    return {
-      text: '已对比海运、空运、海空混合的到货时间、缺货风险和成本影响。',
-      card: { type: 'plan_comparison' },
-    };
-  }
-  if (/规则模拟|安全天数|改成|调整|规则影响|保存规则/.test(text)) {
-    return {
-      text: '已模拟安全天数调整后的采购量、覆盖需求和影响 SKU。',
-      card: { type: 'rule_impact' },
-    };
-  }
-  if (/高风险|必须补货|紧急度|风险队列|优先级/.test(text)) {
-    return {
-      text: '已按风险等级、预计断货时间和建议采购量整理高风险队列。',
-      card: { type: 'risk_queue' },
-    };
-  }
-  if (/大促|节日|Prime|活动备货|母亲节|黑五|圣诞/.test(text)) {
-    return {
-      text: '已按下一个大促节点关联风险 SKU，并测算活动备货缺口。',
-      card: { type: 'holiday_readiness' },
-    };
-  }
-  return null;
-}
 
 function GlobalAIWorkbench({ onAsk, disabled }) {
   const suggested = (window.SKUS || []).filter((s) => s.suggest);
@@ -1190,16 +1041,11 @@ function GlobalAIWorkbench({ onAsk, disabled }) {
   );
 }
 
-function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters, history, setHistory, wide, onToggleWide }) {
+function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters, history, setHistory, wide, onToggleWide, refreshData, showToast }) {
   const [thinking, setThinking] = React.useState(false);
   const [toolStatus, setToolStatus] = React.useState(''); // 正在调用的 tool 名
   const sendToBackend = async (text) => {
     setHistory(h => [...h, { role: 'user', text }]);
-    const localCard = localCardForQuestion(text);
-    if (localCard) {
-      setHistory(h => [...h, { role: 'ai', ...localCard }]);
-      return;
-    }
     setThinking(true);
     setToolStatus('');
     try {
@@ -1217,37 +1063,67 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
         if (dashFilters.owner) filters.owner = dashFilters.owner;
         if (Object.keys(filters).length) context.filters = filters;
       }
-      // 流式:先推一个空 ai bubble,每 delta 增量追加;reasoning 走独立字段
-      setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
-      const append = (key) => (delta) => {
+
+      let explanationStarted = false;
+      const startExplanationBubble = () => {
+        if (!explanationStarted) {
+          explanationStarted = true;
+          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
+        }
+      };
+      const appendDelta = (delta) => {
         setHistory(h => {
           const next = h.slice();
           const last = next[next.length - 1];
           if (last && last.role === 'ai') {
-            next[next.length - 1] = { ...last, [key]: (last[key] || '') + delta };
+            next[next.length - 1] = { ...last, text: (last.text || '') + delta };
           }
           return next;
         });
       };
-      const appendDelta = append('text');
-      const appendReasoning = append('reasoning');
-      await window.api.aiChatStream(msgs, context, (ev) => {
-        if (ev.type === 'delta') appendDelta(ev.text || '');
-        else if (ev.type === 'reasoning_delta') appendReasoning(ev.text || '');
-        else if (ev.type === 'tool_start') setToolStatus(TOOL_LABEL[ev.name] || ev.name);
-        else if (ev.type === 'tool_end') setToolStatus('');
-        else if (ev.type === 'error') appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
-        else if (ev.type === 'done') {
+      const appendReasoning = (delta) => {
+        setHistory(h => {
+          const next = h.slice();
+          const last = next[next.length - 1];
+          if (last && last.role === 'ai') {
+            next[next.length - 1] = { ...last, reasoning: (last.reasoning || '') + delta };
+          }
+          return next;
+        });
+      };
+
+      await window.api.aiSmartDecisionStream(msgs, context, (ev) => {
+        if (ev.type === 'classify') {
+          setToolStatus(SCENARIO_LABEL[ev.scenario] || ev.scenario);
+        } else if (ev.type === 'card') {
+          setToolStatus('');
+          setHistory(h => [...h, { role: 'ai', text: ev.summary, card: ev.card }]);
+        } else if (ev.type === 'reasoning_delta') {
+          startExplanationBubble();
+          appendReasoning(ev.text || '');
+        } else if (ev.type === 'delta') {
+          startExplanationBubble();
+          appendDelta(ev.text || '');
+        } else if (ev.type === 'tool_start') {
+          setToolStatus(TOOL_LABEL[ev.name] || ev.name);
+        } else if (ev.type === 'tool_end') {
+          setToolStatus('');
+        } else if (ev.type === 'error') {
+          startExplanationBubble();
+          appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
+        } else if (ev.type === 'done') {
           setHistory(h => {
             const next = h.slice();
             const last = next[next.length - 1];
-            if (last && last.streaming) next[next.length - 1] = { ...last, streaming: false };
-            return next;
+            if (last && last.streaming && !last.text && !last.reasoning) {
+              return next.slice(0, -1);
+            }
+            return next.map(m => m.streaming ? { ...m, streaming: false } : m);
           });
         }
       });
     } catch (err) {
-      setHistory(h => [...h, { role: 'ai', text: '⚠️ 调用失败:' + err.message }]);
+      setHistory(h => [...h, { role: 'ai', text: '⚠️ ' + err.message }]);
     } finally {
       setThinking(false);
       setToolStatus('');
@@ -1295,6 +1171,8 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
                       if (openCreatePO) openCreatePO(target ? [{ id: target.id, qty: advice.suggestQty, supplier: advice.supplierConfirm }] : []);
                       onClose && onClose();
                     }}
+                    refreshData={refreshData}
+                    showToast={showToast}
                   />
                 )}
               </AIBubble>
@@ -1352,7 +1230,7 @@ const skuQuestions = (sku) => [
   '哪些因素影响最大?',
 ];
 
-function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWide, openCreatePO, openRules }) {
+function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWide, openCreatePO, openRules, refreshData, showToast }) {
   const [thinking, setThinking] = React.useState(false);
   const [toolStatus, setToolStatus] = React.useState('');
   // 挂载后调 /ai/explain — 仅在该 SKU 历史为空时(首次打开),已有历史就跳过
@@ -1415,39 +1293,69 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
           mall_id: sku.mallId,
           store_name: sku.store,
           country_code: sku.country?.code,
-          priority: sku.priority,
         },
       };
-      setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
-      const append = (key) => (delta) => {
+
+      let explanationStarted = false;
+      const startExplanationBubble = () => {
+        if (!explanationStarted) {
+          explanationStarted = true;
+          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true }]);
+        }
+      };
+      const appendDelta = (delta) => {
         setHistory(h => {
           const next = h.slice();
           const last = next[next.length - 1];
           if (last && last.role === 'ai') {
-            next[next.length - 1] = { ...last, [key]: (last[key] || '') + delta };
+            next[next.length - 1] = { ...last, text: (last.text || '') + delta };
           }
           return next;
         });
       };
-      const appendDelta = append('text');
-      const appendReasoning = append('reasoning');
-      await window.api.aiChatStream(msgs, context, (ev) => {
-        if (ev.type === 'delta') appendDelta(ev.text || '');
-        else if (ev.type === 'reasoning_delta') appendReasoning(ev.text || '');
-        else if (ev.type === 'tool_start') setToolStatus(TOOL_LABEL[ev.name] || ev.name);
-        else if (ev.type === 'tool_end') setToolStatus('');
-        else if (ev.type === 'error') appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
-        else if (ev.type === 'done') {
+      const appendReasoning = (delta) => {
+        setHistory(h => {
+          const next = h.slice();
+          const last = next[next.length - 1];
+          if (last && last.role === 'ai') {
+            next[next.length - 1] = { ...last, reasoning: (last.reasoning || '') + delta };
+          }
+          return next;
+        });
+      };
+
+      await window.api.aiSmartDecisionStream(msgs, context, (ev) => {
+        if (ev.type === 'classify') {
+          setToolStatus(SCENARIO_LABEL[ev.scenario] || ev.scenario);
+        } else if (ev.type === 'card') {
+          setToolStatus('');
+          setHistory(h => [...h, { role: 'ai', text: ev.summary, card: ev.card }]);
+        } else if (ev.type === 'reasoning_delta') {
+          startExplanationBubble();
+          appendReasoning(ev.text || '');
+        } else if (ev.type === 'delta') {
+          startExplanationBubble();
+          appendDelta(ev.text || '');
+        } else if (ev.type === 'tool_start') {
+          setToolStatus(TOOL_LABEL[ev.name] || ev.name);
+        } else if (ev.type === 'tool_end') {
+          setToolStatus('');
+        } else if (ev.type === 'error') {
+          startExplanationBubble();
+          appendDelta('\n⚠️ ' + (ev.message || '调用失败'));
+        } else if (ev.type === 'done') {
           setHistory(h => {
             const next = h.slice();
             const last = next[next.length - 1];
-            if (last && last.streaming) next[next.length - 1] = { ...last, streaming: false };
-            return next;
+            if (last && last.streaming && !last.text && !last.reasoning) {
+              return next.slice(0, -1);
+            }
+            return next.map(m => m.streaming ? { ...m, streaming: false } : m);
           });
         }
       });
     } catch (err) {
-      setHistory(h => [...h, { role: 'ai', text: '⚠️ 调用失败:' + err.message }]);
+      setHistory(h => [...h, { role: 'ai', text: '⚠️ ' + err.message }]);
     } finally {
       setThinking(false);
       setToolStatus('');
@@ -1505,6 +1413,8 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
                       if (openCreatePO) openCreatePO([{ id: sku.id, qty: advice.suggestQty, supplier: advice.supplierConfirm }]);
                       onClose && onClose();
                     }}
+                    refreshData={refreshData}
+                    showToast={showToast}
                   />
                 )}
               </AIBubble>

@@ -153,6 +153,9 @@
         ...opts,
       });
     },
+    skuInventoryOverrideUpsert(body) {
+      return postJson('/skus/inventory-overrides/upsert', { tenant_id: TENANT_ID, ...body });
+    },
     calcLatest() {
       return postJson('/calc/latest', { tenant_id: TENANT_ID });
     },
@@ -182,6 +185,9 @@
       if (context) body.context = context;
       return postJson('/ai/chat', body);
     },
+    aiDecisionCard(scenario, context = {}) {
+      return postJson('/ai/decision-card', { tenant_id: TENANT_ID, scenario, context });
+    },
     /**
      * 流式 AI 对话(/ai/chat/stream).
      * 事件类型:tool_start / tool_end / delta / done / error
@@ -190,6 +196,15 @@
       const body = { tenant_id: TENANT_ID, messages };
       if (context) body.context = context;
       return streamSSE('/ai/chat/stream', body, onEvent);
+    },
+    /**
+     * Smart Decision 流(/ai/smart-decision/stream).
+     * 事件类型:classify / card / reasoning_delta / delta / tool_start / tool_end / done / error
+     */
+    aiSmartDecisionStream(messages, context, onEvent) {
+      const body = { tenant_id: TENANT_ID, messages };
+      if (context) body.context = context;
+      return streamSSE('/ai/smart-decision/stream', body, onEvent);
     },
     /**
      * 流式 AI SKU 解释(/ai/explain/stream).
