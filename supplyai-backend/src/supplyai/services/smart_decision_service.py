@@ -28,13 +28,15 @@ SCENARIO_PATTERNS: dict[str, re.Pattern] = {
 }
 
 CLASSIFY_SYSTEM_PROMPT = (
-    "你是意图分类器。用户问题属于以下哪个场景？只返回场景名，不解释。\n"
+    "你是意图分类器。根据用户消息和对话上下文，判断属于以下哪个场景。只返回场景名，不解释。\n"
     "- risk_queue: 查看风险SKU、补货优先级、断货排序\n"
     "- holiday_readiness: 大促备货、节日缺口、活动准备\n"
     "- plan_comparison: 运输方案比较、海运空运对比、物流成本\n"
     "- rule_impact: 规则参数调整影响、安全天数变化\n"
     "- single_sku_replenishment: 单个SKU补货建议\n"
-    "- none: 以上都不是"
+    "- none: 以上都不是\n\n"
+    "重要：如果用户在追问上一轮结果的原因（如'为什么''解释一下''哪些因素'），返回 none。\n"
+    "只有用户明确发起新的场景请求时才返回对应场景名。"
 )
 
 VALID_SCENARIOS: set[str] = {
@@ -74,14 +76,26 @@ class SmartDecisionService:
                 return scenario, "regex"
         return None, ""
 
-    async def _classify_llm(self, text: str) -> tuple[str | None, str]:
-        """第二级:LLM 轻量分类,max_tokens=20,3s 超时."""
+    async def _classify_llm(
+        self, text: str, history: list | None = None,
+    ) -> tuple[str | None, str]:
+        """第二级:LLM 轻量分类,带对话上下文区分追问和新场景."""
         try:
+            context_block = ""
+            if history:
+                recent = []
+                for m in history[-6:]:
+                    role_label = "用户" if m.role == "user" else "助手"
+                    recent.append(f"{role_label}: {m.content[:100]}")
+                if recent:
+                    context_block = "对话上下文:\n" + "\n".join(recent) + "\n\n"
+
+            user_msg = f"{context_block}当前用户消息: {text}"
             resp = await asyncio.wait_for(
                 self._ai_client.chat(
                     messages=[
                         ChatMessage(role="system", content=CLASSIFY_SYSTEM_PROMPT),
-                        ChatMessage(role="user", content=text),
+                        ChatMessage(role="user", content=user_msg),
                     ],
                     max_tokens=20,
                     temperature=0,
@@ -95,12 +109,14 @@ class SmartDecisionService:
             logger.warning("smart_decision_classify_fallback: %s", e)
         return None, ""
 
-    async def _classify(self, text: str) -> tuple[str | None, str]:
-        """两级分类:正则优先,未命中走 LLM."""
+    async def _classify(
+        self, text: str, history: list | None = None,
+    ) -> tuple[str | None, str]:
+        """两级分类:正则优先,未命中走 LLM(带上下文)."""
         scenario, method = self._classify_regex(text)
         if scenario:
             return scenario, method
-        return await self._classify_llm(text)
+        return await self._classify_llm(text, history=history)
 
     def _build_card_summary(self, resp: DecisionCardResponse) -> str:
         """将卡片 JSON 压缩为 200-400 字文本摘要."""
@@ -160,16 +176,7 @@ class SmartDecisionService:
             return
 
         text = req.messages[-1].content
-
-        # 多轮对话视为追问 — 跳过场景分类直接走 chat
-        # 判断标准:至少有 2 条 user 消息(第一条是真实提问,第二条才是追问)
-        # 排除只有系统欢迎语 + 首次提问的场景
-        user_count = sum(1 for m in req.messages if m.role == "user")
-        is_followup = user_count >= 2
-        scenario: str | None = None
-        method = ""
-        if not is_followup:
-            scenario, method = await self._classify(text)
+        scenario, method = await self._classify(text, history=req.messages)
 
         if scenario:
             yield {"type": "classify", "scenario": scenario, "method": method}
