@@ -41,3 +41,44 @@ class ChatResponseMessage(BaseModel):
     model: str = "mock"
     finish_reason: str = "stop"
     status: AiStatus = "ok"
+
+
+DecisionScenario = Literal[
+    "risk_queue",
+    "holiday_readiness",
+    "plan_comparison",
+    "rule_impact",
+    "single_sku_replenishment",
+]
+
+
+class DecisionCardRequest(BaseModel):
+    tenant_id: int
+    scenario: DecisionScenario
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class DecisionCardResponse(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: str
+    scenario: DecisionScenario
+    card: dict[str, Any] = Field(default_factory=dict)
+    calc_run_id: str | None = None
+    source: Literal["backend"] = "backend"
+    status: AiStatus = "ok"
+
+
+class SmartDecisionRequest(BaseModel):
+    """POST /ai/smart-decision/stream 请求体 — 与 ChatRequest 格式一致."""
+
+    tenant_id: int
+    messages: list[ChatRequestMessage] = Field(default_factory=list)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+    def to_chat_request(self) -> ChatRequest:
+        """退化到 chat 时,直接转换为 ChatRequest."""
+        return ChatRequest(
+            tenant_id=self.tenant_id,
+            messages=self.messages,
+            context=self.context,
+        )

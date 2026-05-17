@@ -82,6 +82,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SUPPLY_DASH_ENABLE_THINKING", "dashscope_enable_thinking"),
     )
 
+    # 决策卡片后是否追加 LLM 流式解释 — 默认 true
+    # - true:  卡片渲染后,LLM 异步生成 2-3 句归因解释
+    # - false: 出卡即止,与旧版行为一致
+    card_explain: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("SUPPLY_CARD_EXPLAIN", "card_explain"),
+    )
+
     # ===== 缓存 =====
     cache_backend: Literal["memory", "redis"] = "memory"
     cache_default_ttl: int = 60
