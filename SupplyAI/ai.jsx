@@ -1069,7 +1069,7 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
       const startExplanationBubble = () => {
         if (!explanationStarted) {
           explanationStarted = true;
-          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true, explain: cardSeen }]);
+          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true, explain: true }]);
         }
       };
       const appendDelta = (delta) => {
@@ -1304,7 +1304,7 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
       const startExplanationBubble = () => {
         if (!explanationStarted) {
           explanationStarted = true;
-          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true, explain: cardSeen }]);
+          setHistory(h => [...h, { role: 'ai', text: '', reasoning: '', streaming: true, explain: true }]);
         }
       };
       const appendDelta = (delta) => {
