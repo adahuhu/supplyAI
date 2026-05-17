@@ -161,11 +161,14 @@ class SmartDecisionService:
 
         text = req.messages[-1].content
 
-        # 多轮对话(有 assistant 回复)视为追问,跳过场景分类直接走 chat
-        has_prior_context = any(m.role == "assistant" for m in req.messages)
+        # 多轮对话视为追问 — 跳过场景分类直接走 chat
+        # 判断标准:至少有 2 条 user 消息(第一条是真实提问,第二条才是追问)
+        # 排除只有系统欢迎语 + 首次提问的场景
+        user_count = sum(1 for m in req.messages if m.role == "user")
+        is_followup = user_count >= 2
         scenario: str | None = None
         method = ""
-        if not has_prior_context:
+        if not is_followup:
             scenario, method = await self._classify(text)
 
         if scenario:
