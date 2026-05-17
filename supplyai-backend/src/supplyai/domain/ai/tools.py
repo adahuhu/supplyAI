@@ -97,10 +97,10 @@ def build_tools() -> list[ToolDef]:
             },
         ),
         ToolDef(
-            name="simulate_logistics_options",
+            name="compare_logistics_options",
             description=(
-                "对比多种物流方案的成本和到货时间。给定 listing_id + 目标采购量,"
-                "返回 plans 数组(如纯海运 / 海+空混合),每个方案含 mode/qty/days/estimated_cost。"
+                "基于真实物流方式配置对比多种物流方案的成本和到货时间。给定 listing_id + 目标采购量,"
+                "返回 plans 数组,每个方案含 mode/qty/days/estimated_cost；若未配置真实物流方式则返回错误。"
                 "适用于场景:'纯海运 vs 海+空混合,成本和风险?'"
             ),
             parameters={
@@ -282,7 +282,7 @@ async def _t_generate_purchase_draft(args: dict, session: AsyncSession) -> dict[
     }
 
 
-async def _t_simulate_logistics_options(args: dict, session: AsyncSession) -> dict[str, Any]:
+async def _t_compare_logistics_options(args: dict, session: AsyncSession) -> dict[str, Any]:
     """对比海运 / 空运 / 海+空混合多套物流方案."""
     from supplyai.schemas.sku import SkuDetailRequest
     from supplyai.models.mk import MkRuleLogisticsMethod
@@ -319,19 +319,14 @@ async def _t_simulate_logistics_options(args: dict, session: AsyncSession) -> di
         _sel(MkRuleLogisticsMethod).where(MkRuleLogisticsMethod.is_active == 1)
     )).scalars().all()
     if not methods:
-        # fallback 三档:海派/快船/空派
-        methods_data = [
-            {"mode": "海派", "days": 25, "cost_factor": 1.00},
-            {"mode": "快船", "days": 18, "cost_factor": 1.10},
-            {"mode": "空派", "days": 15, "cost_factor": 1.35},
-        ]
-    else:
-        methods_data = [
-            {"mode": m.logistics_mode, "days": m.logistics_days,
-             # 启发式:每少 10 天加 10% 物流费(空运 > 海运)
-             "cost_factor": 1.0 + max(0, 25 - m.logistics_days) * 0.012}
-            for m in methods
-        ]
+        return {"error": "未配置真实物流方式,无法进行方案对比"}
+
+    methods_data = [
+        {"mode": m.logistics_mode, "days": m.logistics_days,
+         # 仅使用真实方式和真实天数；费用系数是缺少物流报价字段时的保守估算。
+         "cost_factor": 1.0 + max(0, 25 - m.logistics_days) * 0.012}
+        for m in methods
+    ]
 
     # 方案 A:全海运(最便宜方法,假设全部数量)
     sea_method = min(methods_data, key=lambda m: m["cost_factor"])
@@ -439,7 +434,7 @@ _TOOL_REGISTRY: dict[str, Callable[[dict, AsyncSession], Awaitable[dict[str, Any
     "query_replenishment_advice": _t_query_replenishment_advice,
     "query_sku_detail": _t_query_sku_detail,
     "generate_purchase_draft": _t_generate_purchase_draft,
-    "simulate_logistics_options": _t_simulate_logistics_options,
+    "compare_logistics_options": _t_compare_logistics_options,
     "simulate_event_demand": _t_simulate_event_demand,
 }
 

@@ -9,6 +9,7 @@ from supplyai.models.mk.replenishment_rule import MkReplenishmentRule
 from supplyai.models.mk.rule_logistics_method import MkRuleLogisticsMethod
 from supplyai.models.mk.sku_forecast_daily import MkSkuForecastDaily
 from supplyai.models.mk.sku_inbound_detail import MkSkuInboundDetail
+from supplyai.models.mk.sku_inventory_override import MkSkuInventoryOverride
 from supplyai.models.mk.stockout_event import MkStockoutEvent
 from supplyai.models.mk.supply_sku_daily_stat import MkSupplySkuDailyStat
 from supplyai.models.mk.tenant_config import MkTenantConfig
@@ -25,6 +26,7 @@ __all__ = [
     "MkRuleLogisticsMethod",
     "MkSkuForecastDaily",
     "MkSkuInboundDetail",
+    "MkSkuInventoryOverride",
     "MkStockoutEvent",
     "MkSupplySkuDailyStat",
     "MkTenantConfig",

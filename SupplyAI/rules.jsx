@@ -1,13 +1,48 @@
 // 规则设置弹窗 — 补货规则 + 销量预测 两 Tab
 // + 采购计划创建确认 modal
 
-function RulesModal({ open, onClose, ctx, showToast }) {
+function getRuleTargets(scope, ctx) {
+  if (scope === 'global') return [{ scope_type: 'global', mall_id: null, msku: null }];
+  if (ctx?.batch && ctx.skus && ctx.skus.length) {
+    return ctx.skus.map(s => ({
+      scope_type: 'sku',
+      mall_id: s.mall_id ?? s.mallId ?? null,
+      msku: s.msku ?? null,
+    }));
+  }
+  if (ctx?.sku) {
+    return [{
+      scope_type: 'sku',
+      mall_id: ctx.sku.mall_id ?? ctx.sku.mallId ?? null,
+      msku: ctx.sku.msku ?? null,
+    }];
+  }
+  return null;
+}
+
+function getRuleListQuery(target, includeEnabledOnly = false) {
+  const query = {
+    scope_types: [target.scope_type],
+    page_size: 1,
+  };
+  if (includeEnabledOnly) query.enabled_only = true;
+  if (target.mall_id != null) query.mall_id = target.mall_id;
+  if (target.msku) query.msku = target.msku;
+  return query;
+}
+
+function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
   const [tab, setTab] = React.useState('replenish');
   // 规则类型只保留 global / batch。从单个 SKU 进入时,沿用 batch 写入逻辑,
   // 在适用范围里直接显示当前 MSKU+店铺,不再单列"单个特配" tab。
   const [scope, setScope] = React.useState(ctx?.batch || ctx?.sku ? 'batch' : 'global');
   const [saving, setSaving] = React.useState(false);
   const [computing, setComputing] = React.useState(false);
+  const [hydratingRules, setHydratingRules] = React.useState(false);
+  const [replenishRuleId, setReplenishRuleId] = React.useState(null);
+  const [forecastRuleId, setForecastRuleId] = React.useState(null);
+  const [holidayModalOpen, setHolidayModalOpen] = React.useState(false);
+  const [holidayVersion, bumpHolidayVersion] = React.useReducer(x => x + 1, 0);
 
   // Replenish rule state
   const [safeDays, setSafeDays] = React.useState(14);
@@ -30,7 +65,116 @@ function RulesModal({ open, onClose, ctx, showToast }) {
   const [abnormalThreshold, setAbnormalThreshold] = React.useState('');
   const [abnormalDefault, setAbnormalDefault] = React.useState('');
 
+  const holidayRows = React.useMemo(() => (
+    window.getHolidays ? window.getHolidays() : []
+  ), [holidayVersion, open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setScope(ctx?.batch || ctx?.sku ? 'batch' : 'global');
+    setTab(ctx?.mode === 'forecast' ? 'forecast' : 'replenish');
+  }, [open, ctx?.batch, ctx?.sku?.id, ctx?.sku?.listingId, ctx?.mode]);
+
+  React.useEffect(() => {
+    if (!open || !window.api) return;
+    const targets = getRuleTargets(scope, ctx);
+    const target = targets && targets.length === 1 ? targets[0] : null;
+    setReplenishRuleId(null);
+    setForecastRuleId(null);
+    if (!target || (target.scope_type === 'sku' && (!target.mall_id || !target.msku))) return;
+
+    let cancelled = false;
+    setHydratingRules(true);
+    Promise.all([
+      window.api.rulesList
+        ? window.api.rulesList(getRuleListQuery(target, true))
+        : Promise.resolve(null),
+      window.api.forecastRulesList
+        ? window.api.forecastRulesList(getRuleListQuery(target, false))
+        : Promise.resolve(null),
+    ]).then(([replenishResp, forecastResp]) => {
+      if (cancelled) return;
+      const replenish = replenishResp?.rows?.[0];
+      if (replenish) {
+        setReplenishRuleId(replenish.rule_id || null);
+        setSafeDays(Number(replenish.safety_days ?? 14));
+        setPurchaseDuration(Number(replenish.purchase_duration_days ?? 0));
+        setPurchaseDelivery(Number(replenish.delivery_days ?? 0));
+        setQcDays(Number(replenish.qc_days ?? 0));
+      }
+
+      const forecast = forecastResp?.rows?.[0];
+      if (forecast) {
+        setForecastRuleId(forecast.rule_id || null);
+        setForecastMode(forecast.forecast_mode || 'dynamic');
+        setFixedDaily(forecast.fixed_daily_sales ?? '');
+        setDefaultDaily(Number(forecast.default_daily_sales ?? 5));
+        setWeights({
+          d3: Number(forecast.weight_3d ?? 0),
+          d7: Number(forecast.weight_7d ?? 0),
+          d15: Number(forecast.weight_15d ?? 0),
+          d30: Number(forecast.weight_30d ?? 0),
+        });
+        if (Array.isArray(forecast.abnormal_dates_json)) {
+          setExcludeDates(forecast.abnormal_dates_json);
+        }
+        const abn = forecast.abnormal_sales_rule_json;
+        setAbnormalThreshold(abn?.threshold != null ? String(abn.threshold) : '');
+        setAbnormalDefault(abn?.default != null ? String(abn.default) : '');
+      }
+    }).catch(err => {
+      console.warn('load rules failed', err);
+    }).finally(() => {
+      if (!cancelled) setHydratingRules(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [
+    open,
+    scope,
+    ctx?.batch,
+    ctx?.count,
+    ctx?.sku?.id,
+    ctx?.sku?.listingId,
+    ctx?.sku?.mallId,
+    ctx?.sku?.mall_id,
+    ctx?.sku?.msku,
+  ]);
+
   if (!open) return null;
+
+  const saveHoliday = async (draft) => {
+    const normalize = window.normalizeHolidayV7 || (x => x);
+    const normalized = normalize(draft);
+    const current = window.getHolidays ? window.getHolidays() : [];
+    const next = [...current.filter(h => h.id !== normalized.id), normalized];
+    if (window.setGlobalHolidaysV7) window.setGlobalHolidaysV7(next);
+    bumpHolidayVersion();
+    if (window.api && window.api.holidayUpsert) {
+      await window.api.holidayUpsert({
+        holiday_id: normalized.id,
+        name: normalized.name,
+        peak_date: normalized.peak,
+        days_before: normalized.sb,
+        days_after: normalized.sa,
+        sales_multiplier: normalized.mult,
+        color: normalized.color || null,
+        flag: normalized.flag || null,
+        country_code: normalized.countryCode || null,
+        enabled: true,
+      });
+    }
+    return normalized;
+  };
+
+  const deleteHoliday = async (id) => {
+    const current = window.getHolidays ? window.getHolidays() : [];
+    if (window.setGlobalHolidaysV7) window.setGlobalHolidaysV7(current.filter(h => h.id !== id));
+    bumpHolidayVersion();
+    if (window.api && window.api.holidayDelete) {
+      await window.api.holidayDelete({ holiday_id: id });
+    }
+  };
 
   const purchaseLeadTime = purchaseDuration + purchaseDelivery + qcDays + Math.max(...logistics.map(l => l.days));
   const totalCoverage = purchaseLeadTime + safeDays;
@@ -42,13 +186,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
       //   - global:一次 upsert(scope=global, 不带 mall_id+msku)
       //   - 单 SKU 进入:用 ctx.sku 的 mall_id+msku
       //   - 批量进入:遍历 ctx.skus 每个调一次
-      const targets = scope === 'global'
-        ? [{ scope_type: 'global', mall_id: null, msku: null }]
-        : ctx?.batch && ctx.skus && ctx.skus.length
-          ? ctx.skus.map(s => ({ scope_type: 'sku', mall_id: s.mall_id ?? null, msku: s.msku ?? null }))
-          : ctx?.sku
-            ? [{ scope_type: 'sku', mall_id: ctx.sku.mall_id ?? null, msku: ctx.sku.msku ?? null }]
-            : null;
+      const targets = getRuleTargets(scope, ctx);
 
       if (!targets || targets.length === 0) {
         throw new Error('未识别到目标 SKU,请先从 SKU 行或列表勾选进入');
@@ -64,6 +202,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
         for (const t of targets) {
           await window.api.rulesUpsert({
             ...t,
+            ...(targets.length === 1 && replenishRuleId ? { rule_id: replenishRuleId } : {}),
             safety_days: safeDays,
             purchase_duration_days: purchaseDuration,
             delivery_days: purchaseDelivery,
@@ -81,6 +220,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
         for (const t of targets) {
           await window.api.forecastRulesUpsert({
             ...t,
+            ...(targets.length === 1 && forecastRuleId ? { rule_id: forecastRuleId } : {}),
             forecast_mode: forecastMode,
             fixed_daily_sales: forecastMode === 'fixed' && fixedDaily ? +fixedDaily : null,
             default_daily_sales: forecastMode === 'default' ? +defaultDaily : null,
@@ -97,12 +237,29 @@ function RulesModal({ open, onClose, ctx, showToast }) {
       }
       setSaving(false);
       setComputing(true);
+      let calcResp = null;
       if (window.api && window.api.calcRun) {
-        try { await window.api.calcRun(); } catch (_) { /* 忽略 */ }
+        try {
+          calcResp = await window.api.calcRun({ run_type: 'rule_changed' });
+        } catch (err) {
+          setComputing(false);
+          showToast('规则已保存,重新计算失败:' + err.message);
+          return;
+        }
+      }
+      if (refreshData) {
+        try {
+          await refreshData();
+        } catch (err) {
+          setComputing(false);
+          showToast('已重新计算,页面刷新失败:' + err.message);
+          return;
+        }
       }
       setComputing(false);
       onClose();
-      showToast('规则已保存,已重新计算' + (ctx?.batch ? ` · ${targets.length} 个 MSKU` : ''));
+      const calcSuffix = calcResp?.calc_run_id ? ` · ${calcResp.calc_run_id}` : '';
+      showToast('规则已保存,已重新计算' + (ctx?.batch ? ` · ${targets.length} 个 MSKU` : '') + calcSuffix);
     } catch (err) {
       setSaving(false);
       setComputing(false);
@@ -128,6 +285,7 @@ function RulesModal({ open, onClose, ctx, showToast }) {
             </div>
           )}
         </div>
+        <button className="btn sm" onClick={() => setHolidayModalOpen(true)}><Icon name="tag" size={12}/>节日管理</button>
         <button className="btn ghost icon" onClick={onClose}><Icon name="x" size={14}/></button>
       </div>
 
@@ -229,14 +387,23 @@ function RulesModal({ open, onClose, ctx, showToast }) {
       {/* Footer */}
       <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
-          {computing ? <span><span className="pulse">●</span> 计算中…</span> : (saving ? '保存中…' : '修改后保存将触发重新计算')}
+          {hydratingRules ? '读取已保存规则…' : computing ? <span><span className="pulse">●</span> 计算中…</span> : (saving ? '保存中…' : '修改后保存将触发重新计算')}
         </span>
         <div style={{ flex: 1 }}/>
         <button className="btn" onClick={onClose} disabled={saving || computing}>取消</button>
-        <button className="btn primary" onClick={handleSave} disabled={saving || computing}>
+        <button className="btn primary" onClick={handleSave} disabled={hydratingRules || saving || computing}>
           {saving ? '保存中…' : computing ? '计算中…' : '保存'}
         </button>
       </div>
+
+      {holidayModalOpen && window.HolidayManagerModal && (
+        <HolidayManagerModal
+          holidays={holidayRows}
+          onClose={() => setHolidayModalOpen(false)}
+          onSave={saveHoliday}
+          onDelete={deleteHoliday}
+        />
+      )}
     </Modal>
   );
 }

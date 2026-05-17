@@ -11,6 +11,8 @@ from supplyai.repositories.dashboard_repo import DashboardRepository
 from supplyai.repositories.sku_repo import SkuRepository
 from supplyai.schemas.common import PageResult
 from supplyai.schemas.sku import (
+    InventoryOverrideDTO,
+    InventoryOverrideUpsertRequest,
     SkuDetailDTO,
     SkuDetailRequest,
     SkuListRequest,
@@ -52,3 +54,12 @@ async def sku_trends(
 ) -> SkuTrendsDTO:
     """SKU 趋势: 历史销量(rl_amz_sales_daily_report) + 未来预测."""
     return await _build_service(session).trends(req)
+
+
+@router.post("/inventory-overrides/upsert", response_model=InventoryOverrideDTO)
+async def upsert_inventory_override(
+    req: InventoryOverrideUpsertRequest,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> InventoryOverrideDTO:
+    """SKU 趋势图库存点位保存."""
+    return await _build_service(session).upsert_inventory_override(req)

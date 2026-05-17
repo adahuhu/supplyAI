@@ -110,6 +110,9 @@
 
       // 财务(部分字段缺失,UI 容错)
       revenue7: row.revenue_7d,
+      expense7: row.expense_7d,
+      cost7: row.cost_7d,
+      grossProfit7: row.gross_profit_7d,
       grossMargin: row.gross_margin != null ? row.gross_margin * 100 : null,
       financialEstimateType: row.financial_estimate_type || 'hidden',
 
@@ -130,8 +133,6 @@
       // 占位:这些在 mock 中存在,前端某些卡片读取
       price: null,
       cost: row.unit_cost ? Number(row.unit_cost) : null,
-      expense7: null,
-      grossProfit7: null,
       purchaseDuration: 0,
       purchaseDelivery: 0,
       qcDays: 0,
@@ -278,6 +279,14 @@
   function mergeTrendsIntoSku(sku, trendsResp, detailResp) {
     const history = (trendsResp.history || []).map(p => Math.round(p.qty || 0));
     const forecast = (trendsResp.forecast || []).map(p => Math.round(p.qty || 0));
+    const inventoryOverrides = {};
+    (trendsResp.inventory_overrides || []).forEach(row => {
+      const day = Number(row.day_offset);
+      const qty = Number(row.stock_qty);
+      if (Number.isFinite(day) && day > 0 && Number.isFinite(qty) && qty >= 0) {
+        inventoryOverrides[day] = qty;
+      }
+    });
     const recent7 = history.slice(-7);
     const last7Daily = recent7.length
       ? +(recent7.reduce((a, b) => a + b, 0) / recent7.length).toFixed(1)
@@ -290,6 +299,8 @@
       last7Denoised: +(last7Daily * 0.94).toFixed(1),
       future14: forecast.slice(0, 14),
       future30: forecast.slice(0, 30),
+      forecastDates: (trendsResp.forecast || []).map(p => p.date),
+      inventoryOverrides,
     };
     if (detailResp) {
       // detailResp.summary 是 SKU 的最新快照,可补一些列表里没有的字段

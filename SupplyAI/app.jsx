@@ -20,35 +20,43 @@ const GLOBAL_AI_INTRO = '我会基于库存、销量、在途和规则给出补�
 const GLOBAL_AI_SCENARIOS = {
   riskQueue: [
     { role: 'user', text: '本周哪些 SKU 必须补货?按紧急度排序并说明原因。' },
-    { role: 'ai', text: '已按风险等级、预计断货时间和建议采购量整理高风险队列。', card: { type: 'risk_queue' } },
+    { role: 'ai', text: '正在读取后端风险队列。', card: { type: 'backend_decision', scenario: 'risk_queue' } },
   ],
   holidayReadiness: [
     { role: 'user', text: '下一个大促要为哪些 SKU 备货?缺口和建议采购量是多少?' },
-    { role: 'ai', text: '已按下一个大促节点关联风险 SKU，并测算活动备货缺口。', card: { type: 'holiday_readiness' } },
+    { role: 'ai', text: '正在读取后端节日和 SKU 快照。', card: { type: 'backend_decision', scenario: 'holiday_readiness' } },
   ],
   planComparison: [
     { role: 'user', text: '只海运 vs 海+空混合,成本和断货风险分别是什么?' },
-    { role: 'ai', text: '已对比海运、空运、海空混合的到货时间、缺货风险和成本影响。', card: { type: 'plan_comparison' } },
+    { role: 'ai', text: '正在读取后端 SKU 快照和物流方式配置。', card: { type: 'backend_decision', scenario: 'plan_comparison' } },
   ],
   ruleImpact: [
     { role: 'user', text: '安全天数改成 21 天会怎样?采购量和风险等级有什么变化?' },
-    { role: 'ai', text: '已模拟安全天数调整后的采购量、覆盖需求和影响 SKU。', card: { type: 'rule_impact' } },
+    { role: 'ai', text: '正在通过后端计算安全天数影响。', card: { type: 'backend_decision', scenario: 'rule_impact', context: { target_safety_days: 21 } } },
   ],
   ms40060: [
     { role: 'user', text: '挑一个高风险 SKU,告诉我还能卖多久,要不要补、补多少?' },
-    {
-      role: 'ai',
-      text: '该 SKU 处于 P1 紧急风险，FBA 可售仅 1.99 天，预计于 2026-05-10 断货。\n基于全链路库存计算，建议采购 923 件以覆盖 1384.83 件的需求缺口；注意 unit_cost 缺失，采购金额 36.61 USD 仅为基准币参考值。\n请立即在前端确认以下采购草稿并二次审核：SKU MS40060，数量 923 件，供应商待补充。',
-    },
+    { role: 'ai', text: '正在读取后端 SKU 备货建议。', card: { type: 'backend_decision', scenario: 'single_sku_replenishment', context: { listing_id: 1000003 } } },
   ],
 };
 
 function initialGlobalAiHistoryFromUrl() {
   const base = [{ role: 'ai', text: GLOBAL_AI_INTRO }];
   const scenario = new URLSearchParams(window.location.search).get('aiScenario');
-  return scenario && GLOBAL_AI_SCENARIOS[scenario]
+  const page = new URLSearchParams(window.location.search).get('page');
+  return page !== 'sku' && scenario && GLOBAL_AI_SCENARIOS[scenario]
     ? [...base, ...GLOBAL_AI_SCENARIOS[scenario]]
     : base;
+}
+
+function initialSkuAiHistoryFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const scenario = params.get('aiScenario');
+  const skuId = params.get('skuId');
+  if (params.get('page') === 'sku' && skuId && scenario && GLOBAL_AI_SCENARIOS[scenario]) {
+    return { [skuId]: GLOBAL_AI_SCENARIOS[scenario] };
+  }
+  return {};
 }
 
 function App() {
@@ -68,7 +76,7 @@ function App() {
   const [dashFilters, setDashFilters] = React.useState({ store: null, country: null, owner: null });
   // AI 对话历史 — 提升到 App 层,抽屉关闭后再打开仍可见
   const [globalAiHistory, setGlobalAiHistory] = React.useState(initialGlobalAiHistoryFromUrl);
-  const [skuAiHistoryMap, setSkuAiHistoryMap] = React.useState({}); // listingId -> messages[]
+  const [skuAiHistoryMap, setSkuAiHistoryMap] = React.useState(initialSkuAiHistoryFromUrl); // listingId -> messages[]
 
   // 把 dashFilters 翻译成各端点参数
   const buildFilterArgs = React.useCallback((f) => {
@@ -143,6 +151,13 @@ function App() {
   }, [refreshFromBackend]);
 
   React.useEffect(() => {
+    window.refreshSupplyAI = refreshFromBackend;
+    return () => {
+      if (window.refreshSupplyAI === refreshFromBackend) delete window.refreshSupplyAI;
+    };
+  }, [refreshFromBackend]);
+
+  React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', t.theme);
     document.documentElement.setAttribute('data-density', t.density);
   }, [t.theme, t.density]);
@@ -184,6 +199,13 @@ function App() {
     if (!aiOpen) return null;
     if (route.page === 'sku') {
       const sku = SKUS.find(s => s.id === route.skuId) || SKUS[0];
+      if (!sku) {
+        return (
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+            正在加载 SKU 数据…
+          </div>
+        );
+      }
       const key = sku && (sku.listingId || sku.id);
       const history = (key && skuAiHistoryMap[key]) || [];
       const setHistory = (updater) => {
@@ -193,9 +215,9 @@ function App() {
           return { ...prev, [key]: next };
         });
       };
-      return <SKUAIPanel sku={sku} onClose={() => setAiOpen(false)} mode={t.aiMode} history={history} setHistory={setHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)} openCreatePO={openCreatePO} openRules={openRules}/>;
+      return <SKUAIPanel sku={sku} onClose={() => setAiOpen(false)} mode={t.aiMode} history={history} setHistory={setHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)} openCreatePO={openCreatePO} openRules={openRules} refreshData={refreshFromBackend} showToast={showToast}/>;
     }
-    return <GlobalAIPanel onClose={() => setAiOpen(false)} setRoute={(r) => { setRoute(r); }} openCreatePO={openCreatePO} openRules={openRules} dashFilters={dashFilters} history={globalAiHistory} setHistory={setGlobalAiHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)}/>;
+    return <GlobalAIPanel onClose={() => setAiOpen(false)} setRoute={(r) => { setRoute(r); }} openCreatePO={openCreatePO} openRules={openRules} dashFilters={dashFilters} history={globalAiHistory} setHistory={setGlobalAiHistory} wide={aiWide} onToggleWide={() => setAiWide(v => !v)} refreshData={refreshFromBackend} showToast={showToast}/>;
   })();
 
   const aiInDrawer = aiOpen && (t.aiMode === 'drawer' || route.page !== 'sku');
@@ -276,7 +298,7 @@ function App() {
 
       {/* Modals */}
       <ErrorBoundary>
-        <RulesModal open={!!rulesCtx} onClose={() => setRulesCtx(null)} ctx={rulesCtx} showToast={showToast}/>
+        <RulesModal open={!!rulesCtx} onClose={() => setRulesCtx(null)} ctx={rulesCtx} showToast={showToast} refreshData={refreshFromBackend}/>
       </ErrorBoundary>
       <ErrorBoundary>
         <CreatePOModal open={!!poIds} onClose={() => setPoIds(null)} ids={poIds || []} showToast={showToast} setRoute={setRoute}/>

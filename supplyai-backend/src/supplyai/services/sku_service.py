@@ -8,6 +8,7 @@ from supplyai.models.mk import (
     MkListingProductSources,
     MkSkuForecastDaily,
     MkSkuInboundDetail,
+    MkSkuInventoryOverride,
     MkSupplySkuDailyStat,
 )
 from supplyai.repositories.dashboard_repo import DashboardRepository
@@ -15,6 +16,8 @@ from supplyai.repositories.sku_repo import SkuRepository
 from supplyai.schemas.common import DataQuality, DataQualityWarning, PageResult
 from supplyai.schemas.sku import (
     ForecastTrendPoint,
+    InventoryOverrideDTO,
+    InventoryOverrideUpsertRequest,
     InboundDetailDTO,
     SkuDetailDTO,
     SkuDetailRequest,
@@ -62,6 +65,12 @@ def _compute_future_30d_profit(
     return round(
         float(future_daily) * 30 * float(unit_cost) * _GROSS_MARGIN_HEURISTIC, 2
     )
+
+
+def _inventory_override_id(
+    *, tenant_id: int, listing_id: int, forecast_date: date
+) -> str:
+    return f"INVOVR-{tenant_id}-{listing_id}-{forecast_date.isoformat()}"
 
 
 def _row_to_dto(
@@ -125,6 +134,9 @@ def _row_to_dto(
         suggest_amount_base=_to_float(stat.suggest_amount_base),
         base_currency=stat.base_currency,
         revenue_7d=_to_float(stat.revenue_7d),
+        expense_7d=_to_float(stat.expense_7d),
+        cost_7d=_to_float(stat.cost_7d),
+        gross_profit_7d=_to_float(stat.gross_profit_7d),
         gross_margin=_to_float(stat.gross_margin),
         financial_estimate_type=stat.financial_estimate_type,  # type: ignore[arg-type]
         expected_loss_revenue_7d=_compute_loss_revenue_7d(
@@ -282,7 +294,9 @@ class SkuService:
             mall_id=stat.mall_id,
             msku=stat.msku,
         )
-        inbound_list = [InboundDetailDTO.model_validate(inb) for inb in inbound_rows]
+        inbound_list = _fba_inbound_breakdown(stat) + [
+            InboundDetailDTO.model_validate(inb) for inb in inbound_rows
+        ]
 
         data_quality = _build_data_quality(stat, lps, forecast_rows)
 
@@ -337,6 +351,10 @@ class SkuService:
             TrendPoint(date=fc.forecast_date, qty=float(fc.forecast_qty))
             for fc in forecast_rows
         ]
+        overrides = await self._sku_repo.list_inventory_overrides(
+            tenant_id=req.tenant_id,
+            listing_id=req.listing_id,
+        )
 
         return SkuTrendsDTO(
             calc_run_id=calc_run_id,
@@ -344,11 +362,105 @@ class SkuService:
             mall_id=stat.mall_id,
             history=history,
             forecast=forecast,
+            inventory_overrides=[
+                InventoryOverrideDTO.model_validate(row) for row in overrides
+            ],
         )
+
+    async def upsert_inventory_override(
+        self,
+        req: InventoryOverrideUpsertRequest,
+    ) -> InventoryOverrideDTO:
+        """保存 SKU 趋势图上的库存点位覆盖."""
+        calc_run_id = req.calc_run_id or await self._dashboard_repo.latest_calc_run_id(
+            req.tenant_id
+        )
+        if not calc_run_id:
+            raise CalcRunNotFoundException(req.tenant_id)
+
+        calc_run = await self._dashboard_repo.get_calc_run(calc_run_id)
+        if not calc_run:
+            raise CalcRunNotFoundException(req.tenant_id)
+
+        row = await self._sku_repo.get_one(
+            calc_run_id=calc_run_id,
+            tenant_id=req.tenant_id,
+            listing_id=req.listing_id,
+        )
+        if row is None:
+            listing = await self._sku_repo.get_listing_only(
+                tenant_id=req.tenant_id, listing_id=req.listing_id
+            )
+            if listing is not None and listing.delivery_method == "FBM":
+                raise FbmNotSupportedException(req.listing_id)
+            raise SkuNotFoundException(req.listing_id)
+        stat, _lps, _mall_name = row
+
+        forecast_row = await self._sku_repo.forecast_by_offset(
+            calc_run_id=calc_run_id,
+            tenant_id=req.tenant_id,
+            mall_id=stat.mall_id,
+            msku=stat.msku,
+            day_offset=req.day_offset,
+        )
+        forecast_date = (
+            (forecast_row.forecast_date if forecast_row else None)
+            or req.forecast_date
+            or (calc_run.stat_date + timedelta(days=req.day_offset))
+        )
+
+        saved = await self._sku_repo.upsert_inventory_override(
+            MkSkuInventoryOverride(
+                override_id=_inventory_override_id(
+                    tenant_id=req.tenant_id,
+                    listing_id=req.listing_id,
+                    forecast_date=forecast_date,
+                ),
+                tenant_id=req.tenant_id,
+                listing_id=req.listing_id,
+                calc_run_id=calc_run_id,
+                mall_id=stat.mall_id,
+                msku=stat.msku,
+                forecast_date=forecast_date,
+                day_offset=req.day_offset,
+                stock_qty=req.stock_qty,
+                updated_by=req.updated_by,
+                source_type="frontend",
+            )
+        )
+        return InventoryOverrideDTO.model_validate(saved)
 
 
 def _parse_iso_date(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def _fba_inbound_breakdown(stat: MkSupplySkuDailyStat) -> list[InboundDetailDTO]:
+    """把 FBA 平台侧在途数量拆成详情页可展开明细.
+
+    mk_sku_inbound_detail 只保留本地侧采购/调拨在途；FBA working/shipped/receiving
+    来自快照表和 rl_amz_manage_fba_inventory,否则前端只有"1 笔"入口但没有内容。
+    """
+    specs = [
+        ("fba_working", "pending", stat.fba_inbound_working or 0, "FBA-WORKING"),
+        ("fba_shipped", "in_transit", stat.fba_inbound_shipped or 0, "FBA-SHIPPED"),
+        ("fba_receiving", "receiving", stat.fba_inbound_receiving or 0, "FBA-RECEIVING"),
+    ]
+    rows: list[InboundDetailDTO] = []
+    for inbound_type, status, qty, order_no in specs:
+        if qty <= 0:
+            continue
+        rows.append(
+            InboundDetailDTO(
+                inbound_id=f"{order_no}-{stat.listing_id or stat.id}",
+                inbound_type=inbound_type,
+                inbound_status=status,
+                qty=qty,
+                expected_arrival_date=stat.stockout_date,
+                source_order_no=order_no,
+            )
+        )
+    return rows
 
 
 def _build_data_quality(

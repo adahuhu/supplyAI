@@ -40,7 +40,7 @@ def test_build_tools_returns_full_set() -> None:
         "query_replenishment_advice",
         "query_sku_detail",
         "generate_purchase_draft",
-        "simulate_logistics_options",
+        "compare_logistics_options",
         "simulate_event_demand",
     ])
     for t in tools:

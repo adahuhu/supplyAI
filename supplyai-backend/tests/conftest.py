@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from supplyai.db import async_session_factory
 from supplyai.domain.ai import factory as ai_factory
@@ -15,9 +15,11 @@ from supplyai.main import app
 from supplyai.models.mk import (
     MkCalcRun,
     MkExportTask,
+    MkForecastRule,
     MkPurchaseDraft,
     MkReplenishmentRule,
     MkSkuForecastDaily,
+    MkSkuInventoryOverride,
     MkSupplySkuDailyStat,
 )
 from tests._ai_stub import StubAiClient
@@ -38,7 +40,7 @@ def _patch_ai_factory(monkeypatch):
 
 
 async def _cleanup_test_data() -> None:
-    """清理测试触发的 RUN-/DRAFT-/EXP-/RULE-T- 前缀数据."""
+    """清理测试触发的数据,避免删除本地演示时由前端保存的规则."""
     async with async_session_factory() as session:
         exp_rows = (
             await session.execute(
@@ -58,7 +60,20 @@ async def _cleanup_test_data() -> None:
         )
         await session.execute(
             delete(MkReplenishmentRule).where(
-                MkReplenishmentRule.rule_id.like("RULE-T-%")
+                or_(
+                    MkReplenishmentRule.updated_by.in_(
+                        ["pytest", "tester", "e2e", "e2e-test"]
+                    ),
+                    MkReplenishmentRule.msku.like("RULE-PERSIST-%"),
+                )
+            )
+        )
+        await session.execute(
+            delete(MkForecastRule).where(MkForecastRule.updated_by == "pytest")
+        )
+        await session.execute(
+            delete(MkSkuInventoryOverride).where(
+                MkSkuInventoryOverride.updated_by == "pytest"
             )
         )
         await session.execute(

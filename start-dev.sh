@@ -14,11 +14,20 @@
 set -e
 cd "$(dirname "$0")"
 
+# 允许新机器只配置 supplyai-backend/.env 即可启动。
+# 仅导出 KEY=VALUE 简单行；复杂 shell 表达式仍建议用户自己 export。
+if [[ -f "supplyai-backend/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "supplyai-backend/.env"
+  set +a
+fi
+
 # ── 前置检查 ────────────────────────────────────────────
 if [[ -z "$SUPPLY_DASH_API_KEY" && -z "$DASHSCOPE_API_KEY" ]]; then
   echo "✘ 未检测到 SUPPLY_DASH_API_KEY 或 DASHSCOPE_API_KEY 环境变量。"
+  echo "  请复制 supplyai-backend/env.example 为 supplyai-backend/.env 并填写 API key。"
   echo "  AI 端点(/ai/explain, /ai/chat)启动后会立即报错。"
-  echo "  请先 export 或 source ~/.zshrc 后重试。"
   exit 1
 fi
 

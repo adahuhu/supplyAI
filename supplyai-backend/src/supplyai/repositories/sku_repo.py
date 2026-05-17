@@ -11,6 +11,7 @@ from supplyai.models.mk import (
     MkPurchaseDraft,
     MkSkuForecastDaily,
     MkSkuInboundDetail,
+    MkSkuInventoryOverride,
     MkStockoutEvent,
     MkSupplySkuDailyStat,
 )
@@ -60,7 +61,7 @@ class SkuRepository:
             kw = f"%{keyword}%"
             base_filters.append(
                 or_(stat.msku.ilike(kw), stat.sku.ilike(kw), stat.asin.ilike(kw),
-                    stat.product_name.ilike(kw))
+                    stat.fnsku.ilike(kw), stat.product_name.ilike(kw))
             )
         if suggest_only:
             base_filters.append(stat.suggest_purchase == 1)
@@ -293,6 +294,71 @@ class SkuRepository:
             select(fc).where(*filters).order_by(fc.day_offset.asc())
         )
         return list(result.scalars().all())
+
+    async def forecast_by_offset(
+        self,
+        *,
+        calc_run_id: str,
+        tenant_id: int,
+        mall_id: int | None,
+        msku: str,
+        day_offset: int,
+    ) -> MkSkuForecastDaily | None:
+        """按 day_offset 查预测点,用于库存 override 对齐 forecast_date."""
+        fc = MkSkuForecastDaily
+        filters = [
+            fc.calc_run_id == calc_run_id,
+            fc.tenant_id == tenant_id,
+            fc.msku == msku,
+            fc.day_offset == day_offset,
+        ]
+        if mall_id is not None:
+            filters.append(fc.mall_id == mall_id)
+        return await self._session.scalar(select(fc).where(*filters))
+
+    async def list_inventory_overrides(
+        self,
+        *,
+        tenant_id: int,
+        listing_id: int,
+    ) -> list[MkSkuInventoryOverride]:
+        """读取 SKU 已保存的库存点位覆盖."""
+        ovr = MkSkuInventoryOverride
+        result = await self._session.execute(
+            select(ovr)
+            .where(ovr.tenant_id == tenant_id, ovr.listing_id == listing_id)
+            .order_by(ovr.day_offset.asc())
+        )
+        return list(result.scalars().all())
+
+    async def upsert_inventory_override(
+        self,
+        row: MkSkuInventoryOverride,
+    ) -> MkSkuInventoryOverride:
+        """按 tenant + listing + forecast_date 幂等保存库存覆盖点."""
+        existing = await self._session.scalar(
+            select(MkSkuInventoryOverride).where(
+                MkSkuInventoryOverride.tenant_id == row.tenant_id,
+                MkSkuInventoryOverride.listing_id == row.listing_id,
+                MkSkuInventoryOverride.forecast_date == row.forecast_date,
+            )
+        )
+        if existing is None:
+            self._session.add(row)
+            await self._session.commit()
+            await self._session.refresh(row)
+            return row
+
+        existing.calc_run_id = row.calc_run_id
+        existing.mall_id = row.mall_id
+        existing.msku = row.msku
+        existing.day_offset = row.day_offset
+        existing.stock_qty = row.stock_qty
+        existing.updated_by = row.updated_by
+        existing.source_type = row.source_type
+        await self._session.commit()
+        await self._session.refresh(existing)
+        return existing
 
     async def inbound_list(
         self,

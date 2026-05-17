@@ -231,7 +231,7 @@ class SmartDecisionService:
                             }
                             return
                 except Exception as e:  # noqa: BLE001
-                    logger.warning("smart_decision_explain_failed: %s", e)
+                    logger.warning("smart_decision_explain_failed: %s: %s", type(e).__name__, e)
 
             yield {"type": "done", "finish_reason": "stop", "scenario": scenario}
             return

@@ -6,13 +6,14 @@
 
 ---
 
-## 快速启动(本地,macOS / Linux)
+## 快速启动(本地,Apple Silicon Mac / Linux)
 
 ### 1. 一次性配置
 
 ```bash
-# 1) uv 包管理器
-brew install uv          # macOS;Linux 用 https://docs.astral.sh/uv/
+# 1) macOS 基础工具
+xcode-select --install
+brew install git uv
 
 # 2) 依赖
 cd supplyai-backend
@@ -40,6 +41,8 @@ uv run uvicorn supplyai.main:app --reload --port 8000
 cd ..
 ./start-dev.sh
 ```
+
+`../start-dev.sh` 会自动读取 `supplyai-backend/.env`，新机器不需要额外 `export SUPPLY_DASH_API_KEY`。
 
 ### 3. 验证
 
@@ -105,7 +108,7 @@ supplyai-backend/
     │   ├── skus.py         # /skus/{list,detail,trends}
     │   ├── purchase.py     # /purchase/draft/{create,list,confirm,redirect}
     │   ├── rules.py        # /rules/{list,upsert,disable,forecast/*}
-    │   ├── ai.py           # /ai/{explain,chat} + /ai/{explain,chat}/stream (SSE)
+    │   ├── ai.py           # /ai/{explain,chat,decision-card} + stream (SSE)
     │   ├── calc.py         # /calc/{run,latest,status}
     │   ├── exports.py      # /exports/sku-list + 同步/异步双模式
     │   ├── auth.py         # /auth/me(Phase 5 接 JWT)
@@ -119,7 +122,7 @@ supplyai-backend/
     ├── services/           # 应用编排(API 与领域逻辑的胶水)
     ├── domain/
     │   ├── calc/           # 预测 / 风险 / 覆盖 / 建议派生
-    │   └── ai/             # DashScope client + Orchestrator + 4 Tools + Foundation Skills
+    │   └── ai/             # DashScope client + Orchestrator + Tools + Foundation Skills
     ├── tasks/              # 任务运行器(local / celery)
     ├── cache/              # 缓存(in-memory / redis)抽象
     └── utils/              # 异常 + 日志
@@ -198,16 +201,20 @@ mk_ (13 张,项目派生)
 事件协议:
   data: {"type":"reasoning_delta","text":"..."}      // 思考 token(可折叠)
   data: {"type":"delta","text":"..."}                // 答复 token
-  data: {"type":"tool_start","name":"query_skus",...}
-  data: {"type":"tool_end","name":"query_skus","ok":true,"summary":"返回 3 条"}
+  data: {"type":"tool_start","name":"query_stockout_risk",...}
+  data: {"type":"tool_end","name":"query_stockout_risk","ok":true,"summary":"返回 3 条"}
   data: {"type":"done","finish_reason":"stop","tool_iterations":1}
 ```
 
-**4 个 AI Tools(orchestrator 调度):**
-- `query_skus` — 多条件查 SKU 列表
+**AI Tools(orchestrator 调度):**
 - `query_stockout_risk` — 查风险队列
-- `get_sku_detail` — 单 SKU 详情
-- `generate_purchase_draft` — 生成采购草稿(支持 dry_run / confirmed)
+- `query_replenishment_advice` — 查备货建议
+- `query_sku_detail` — 单 SKU 详情
+- `compare_logistics_options` — 基于真实物流方式配置对比运输方案
+- `simulate_event_demand` — 活动期需求测算
+- `generate_purchase_draft` — 生成采购计划(支持 dry_run / confirmed)
+
+结构化 AI 决策卡走 `/ai/decision-card`，前端只负责展示，不在浏览器本地推导业务结论。
 
 ---
 

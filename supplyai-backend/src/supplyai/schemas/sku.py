@@ -87,6 +87,9 @@ class SkuSummaryDTO(BaseModel):
     base_currency: str | None
     # 财务
     revenue_7d: float | None
+    expense_7d: float | None
+    cost_7d: float | None
+    gross_profit_7d: float | None
     gross_margin: float | None
     financial_estimate_type: FinancialEstimateType | None
     # 价值维度(AI Agent / 列表排序 / 风险榜单用)
@@ -160,6 +163,36 @@ class SkuTrendsRequest(BaseModel):
     history_days: int = 90  # 历史窗口
 
 
+class InventoryOverrideUpsertRequest(BaseModel):
+    """SKU 趋势图库存点位保存请求."""
+
+    tenant_id: int
+    listing_id: int
+    calc_run_id: str | None = None
+    day_offset: int = Field(gt=0)
+    stock_qty: int = Field(ge=0)
+    forecast_date: date | None = None
+    updated_by: str | None = "frontend"
+
+
+class InventoryOverrideDTO(BaseModel):
+    """SKU 趋势图库存点位覆盖响应."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    override_id: str
+    tenant_id: int
+    listing_id: int
+    calc_run_id: str | None
+    mall_id: int | None
+    msku: str
+    forecast_date: date
+    day_offset: int
+    stock_qty: int
+    updated_by: str | None
+    updated_at: datetime
+
+
 class TrendPoint(BaseModel):
     date: date
     qty: float
@@ -173,3 +206,4 @@ class SkuTrendsDTO(BaseModel):
     mall_id: int | None
     history: list[TrendPoint] = Field(default_factory=list)
     forecast: list[TrendPoint] = Field(default_factory=list)
+    inventory_overrides: list[InventoryOverrideDTO] = Field(default_factory=list)

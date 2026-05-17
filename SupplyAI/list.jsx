@@ -2,12 +2,16 @@
 
 const LIST_SORT_ACCESSORS = {
   product: s => s.name || '',
+  sku: s => s.sku || '',
   store: s => s.store || '',
   status: s => s.status || '',
   priority: s => PRIORITY_ORDER[s.priority] ?? 99,
   sales7d: s => s.sales7d ?? (s.recent7 || []).reduce((a, b) => a + b, 0),
   futureDaily: s => s.futureDaily ?? 0,
   revenue7: s => s.revenue7 ?? 0,
+  expense7: s => s.expense7 ?? 0,
+  cost7: s => s.cost7 ?? 0,
+  grossProfit7: s => s.grossProfit7 ?? 0,
   grossMargin: s => s.grossMargin ?? null,
   fbaAvail: s => s.fbaAvail ?? 0,
   fbaInTransit: s => s.fbaInTransit ?? 0,
@@ -91,6 +95,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
   const [filter, setFilter] = React.useState(initialFilter);
   const [keyword, setKeyword] = React.useState(initialKeyword);
   const [sort, setSort] = React.useState({ key: 'priority', dir: 'asc' });
+  const [localVersion, bumpLocalVersion] = React.useReducer(x => x + 1, 0);
   // 顶部 + 高级筛选 state
   const [storeFilter, setStoreFilter] = React.useState(initialMallId ? String(initialMallId) : null);     // mall_id 字符串
   const [countryFilter, setCountryFilter] = React.useState(null); // country code
@@ -103,6 +108,18 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
   const [selected, setSelected] = React.useState(new Set());
   const [advFilters, setAdvFilters] = React.useState(false);
   const [columnsOpen, setColumnsOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    setFilter(initialFilter || 'all');
+  }, [initialFilter]);
+
+  React.useEffect(() => {
+    setKeyword(initialKeyword || '');
+  }, [initialKeyword]);
+
+  React.useEffect(() => {
+    setStoreFilter(initialMallId ? String(initialMallId) : null);
+  }, [initialMallId]);
 
   const filtered = React.useMemo(() => {
     let rows = SKUS;
@@ -121,6 +138,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
         || (s.asin || '').toLowerCase().includes(kw)
         || (s.fnsku || '').toLowerCase().includes(kw)
         || (s.name || '').toLowerCase().includes(kw)
+        || (s.store || '').toLowerCase().includes(kw)
       );
     }
     if (storeFilter) rows = rows.filter(s => String(s.mallId) === storeFilter);
@@ -135,7 +153,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     if (brandFilter) rows = rows.filter(s => s.brand === brandFilter);
     if (categoryFilter) rows = rows.filter(s => s.category === categoryFilter);
     return rows;
-  }, [filter, keyword, storeFilter, countryFilter, ownerFilter, suggestOnly, statusFilter, sellableBucket, brandFilter, categoryFilter]);
+  }, [filter, keyword, storeFilter, countryFilter, ownerFilter, suggestOnly, statusFilter, sellableBucket, brandFilter, categoryFilter, localVersion]);
 
   const sorted = React.useMemo(() => {
     const rows = [...filtered];
@@ -161,6 +179,9 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     sales7d: sumBy(filtered, s => s.sales7d ?? (s.recent7 || []).reduce((a, b) => a + b, 0)),
     futureDaily: sumBy(filtered, s => s.futureDaily),
     revenue7: sumBy(filtered, s => s.revenue7),
+    expense7: sumBy(filtered, s => s.expense7),
+    cost7: sumBy(filtered, s => s.cost7),
+    grossProfit7: sumBy(filtered, s => s.grossProfit7),
     grossMarginAvg: avgBy(filtered, s => s.grossMargin),
     fbaAvail: sumBy(filtered, s => s.fbaAvail),
     fbaInTransit: sumBy(filtered, s => s.fbaInTransit),
@@ -366,19 +387,23 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <table className="t" style={{ minWidth: 1680 }}>
+        <table className="t" style={{ minWidth: 1960 }}>
           <thead>
             <tr>
               <th style={{ width: 36, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 3, boxShadow: '1px 0 0 var(--border)' }}>
                 <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleAll} />
               </th>
 	              <SortTh id="product" style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 3, minWidth: 280, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>商品</SortTh>
+	              <SortTh id="sku">SKU</SortTh>
 	              <SortTh id="store">店铺/国家</SortTh>
 	              <SortTh id="status">状态</SortTh>
 	              <SortTh id="priority">风险</SortTh>
 	              <SortTh id="sales7d" className="num">近 7 天销量</SortTh>
 	              <SortTh id="futureDaily" className="num">预测日销</SortTh>
 	              <SortTh id="revenue7" className="num">收入</SortTh>
+	              <SortTh id="expense7" className="num">支出</SortTh>
+	              <SortTh id="cost7" className="num">成本</SortTh>
+	              <SortTh id="grossProfit7" className="num">毛利润</SortTh>
 	              <SortTh id="grossMargin" className="num">毛利率</SortTh>
 	              <SortTh id="fbaAvail" className="num">FBA 可用</SortTh>
 	              <SortTh id="fbaInTransit" className="num">FBA 在途</SortTh>
@@ -418,6 +443,10 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                       </div>
                     </div>
                   </td>
+                  <td className="mono" style={{ fontSize: 11.5 }}>
+                    <div style={{ color: 'var(--text-2)', fontWeight: 500 }}>{s.sku || '—'}</div>
+                    <div style={{ color: 'var(--text-4)', marginTop: 2 }}>FNSKU {s.fnsku || '—'}</div>
+                  </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span>{s.country.flag}</span>
@@ -434,8 +463,13 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                   <td className="num">
                     <SalesTrendCell data={s.recent7} />
                   </td>
-                  <td className="num tabular">{s.futureDaily}</td>
+                  <td className="num" onClick={(e) => e.stopPropagation()}>
+                    <EditableForecastCell sku={s} onSaved={bumpLocalVersion}/>
+                  </td>
                   <td className="num tabular">{fmt.money(s.revenue7)}</td>
+                  <td className="num tabular">{fmt.money(s.expense7)}</td>
+                  <td className="num tabular">{fmt.money(s.cost7)}</td>
+                  <td className="num tabular" style={{ color: (s.grossProfit7 || 0) < 0 ? 'var(--p1)' : 'inherit' }}>{fmt.money(s.grossProfit7)}</td>
                   <td className="num tabular" style={{ color: s.grossMargin < 0 ? 'var(--p1)' : 'inherit' }}>{fmt.pct(s.grossMargin)}</td>
                   <td className="num tabular">{fmt.num(s.fbaAvail)}</td>
                   <td className="num" onClick={(e) => e.stopPropagation()}>
@@ -482,9 +516,13 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 	              <td />
 	              <td />
 	              <td />
+	              <td />
 	              <td className="num tabular">{fmt.num(totals.sales7d)}</td>
 	              <td className="num tabular">{fmt.num(+totals.futureDaily.toFixed(2))}</td>
 	              <td className="num tabular">{fmt.money(+totals.revenue7.toFixed(2))}</td>
+	              <td className="num tabular">{fmt.money(+totals.expense7.toFixed(2))}</td>
+	              <td className="num tabular">{fmt.money(+totals.cost7.toFixed(2))}</td>
+	              <td className="num tabular">{fmt.money(+totals.grossProfit7.toFixed(2))}</td>
 	              <td className="num tabular">{totals.grossMarginAvg == null ? '—' : '均 ' + fmt.pct(totals.grossMarginAvg)}</td>
 	              <td className="num tabular">{fmt.num(totals.fbaAvail)}</td>
 	              <td className="num tabular">{fmt.num(totals.fbaInTransit)}</td>
@@ -537,7 +575,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
         </div>
         <div style={{ padding: 16, overflow: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {[
-          '商品', '店铺/国家', '状态', '标签', '风险', '近 7 天销量', '预测日销',
+          '商品', 'SKU', '店铺/国家', '状态', '标签', '风险', '近 7 天销量', '预测日销',
           '收入', '支出', '成本', '毛利润', '毛利率',
           'FBA 可用', 'FBA 在途', '本地实际', '本地预计', '本地库存', '总库存',
           '可售天数', '预计断货', '采购时效', '建议采购', '建议采购量', '建议采购时间', '最后更新'].
@@ -555,6 +593,130 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
       </Drawer>
     </div>);
 
+}
+
+function dateAddList(base, days) {
+  const d = new Date(base || Date.now());
+  d.setDate(d.getDate() + Math.ceil(days || 0));
+  return d;
+}
+
+function recalcSkuForecastList(sku, nextDaily) {
+  const daily = Math.max(0, Number(nextDaily) || 0);
+  sku.futureDaily = +daily.toFixed(2);
+  sku.coverageDemand = +(sku.totalCoverage * daily).toFixed(2);
+  sku.sellable = daily > 0 ? +(sku.totalStock / daily).toFixed(2) : 0;
+  sku.fbaSellable = daily > 0 ? +((sku.fbaAvail + sku.fbaInTransit) / daily).toFixed(2) : 0;
+  sku.localSellable = daily > 0 ? +((sku.localTotal || 0) / daily).toFixed(2) : 0;
+  sku.suggestQty = Math.max(0, Math.ceil(sku.coverageDemand - sku.totalStock));
+  sku.suggest = sku.suggestQty > 0;
+  const asOf = DASH_STATS.asOf || new Date();
+  sku.stockoutDate = daily > 0 ? dateAddList(asOf, sku.fbaSellable) : null;
+  sku.purchaseDate = sku.stockoutDate ? dateAddList(sku.stockoutDate, -(sku.purchaseLeadTime || 0)) : null;
+  sku.priority = sku.fbaSellable <= 7 ? 'p1'
+    : sku.fbaSellable <= 15 ? 'p2'
+    : sku.fbaSellable <= 30 ? 'p3'
+    : 'safe';
+  sku.lastUpdated = new Date();
+}
+
+function EditableForecastCell({ sku, onSaved }) {
+  const [editing, setEditing] = React.useState(false);
+  const [value, setValue] = React.useState(String(sku.futureDaily ?? 0));
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  React.useEffect(() => {
+    if (!editing) setValue(String(sku.futureDaily ?? 0));
+  }, [sku.futureDaily, editing]);
+
+  const commit = async () => {
+    const next = Number(value);
+    if (!Number.isFinite(next) || next < 0) {
+      setErr('请输入有效数字');
+      return;
+    }
+    const prev = { ...sku };
+    recalcSkuForecastList(sku, next);
+    onSaved?.();
+    setSaving(true);
+    setErr('');
+    try {
+      if (window.api && window.api.forecastRulesUpsert) {
+        await window.api.forecastRulesUpsert({
+          scope_type: 'sku',
+          mall_id: sku.mall_id ?? sku.mallId ?? null,
+          msku: sku.msku,
+          forecast_mode: 'fixed',
+          fixed_daily_sales: next,
+          default_daily_sales: null,
+          weight_3d: 0,
+          weight_7d: 100,
+          weight_15d: 0,
+          weight_30d: 0,
+          denoise_enabled: false,
+          abnormal_dates_json: null,
+          abnormal_sales_rule_json: null,
+          updated_by: 'frontend',
+        });
+        if (window.api.calcRun) await window.api.calcRun();
+      }
+      setEditing(false);
+    } catch (e) {
+      Object.assign(sku, prev);
+      setErr(e.message || '保存失败');
+      onSaved?.();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <button
+        className="btn ghost"
+        title="点击修改预测日销"
+        onClick={() => setEditing(true)}
+        style={{ height: 24, padding: '0 7px', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}
+      >
+        {(+sku.futureDaily).toFixed(2)}
+        <Icon name="edit" size={10} color="var(--text-4)"/>
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, position: 'relative' }}>
+      <input
+        className="txt"
+        type="number"
+        min="0"
+        step="0.01"
+        value={value}
+        disabled={saving}
+        autoFocus
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') { setEditing(false); setErr(''); }
+        }}
+        style={{ width: 76, height: 24, padding: '0 6px', textAlign: 'right', fontSize: 12 }}
+      />
+      <button className="btn ghost icon sm" title="保存" onClick={commit} disabled={saving}>
+        <Icon name={saving ? 'refresh' : 'check'} size={11}/>
+      </button>
+      <button className="btn ghost icon sm" title="取消" onClick={() => { setEditing(false); setErr(''); }} disabled={saving}>
+        <Icon name="x" size={11}/>
+      </button>
+      {err && (
+        <span style={{
+          position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 40,
+          background: 'var(--surface)', color: 'var(--p1)', border: '1px solid var(--border)',
+          borderRadius: 4, padding: '4px 6px', fontSize: 10.5, whiteSpace: 'nowrap',
+        }}>{err}</span>
+      )}
+    </div>
+  );
 }
 
 // FBAInboundCell — 点击 FBA 在途数字弹出 popover,懒加载 inbound_list
@@ -684,6 +846,9 @@ function FBAInboundCell({ sku }) {
 }
 
 const INBOUND_TYPE_LABEL = {
+  fba_working: 'FBA 计划入库',
+  fba_shipped: 'FBA 已发货',
+  fba_receiving: 'FBA 入库中',
   purchase: '空派',
   transfer: '海派',
   local_receiving: '本地收货',

@@ -320,132 +320,30 @@ function datePickerFormat(d) {
 }
 
 function DatePicker({ value, onChange, placeholder = '选择日期', title, testId, style, disabled = false }) {
-  const selected = datePickerParse(value);
-  const baseMonth = selected || new Date();
-  const [open, setOpen] = React.useState(false);
-  const [month, setMonth] = React.useState(() => new Date(baseMonth.getFullYear(), baseMonth.getMonth(), 1));
-
-  React.useEffect(() => {
-    if (selected) setMonth(new Date(selected.getFullYear(), selected.getMonth(), 1));
-  }, [value]);
-
-  const start = new Date(month.getFullYear(), month.getMonth(), 1);
-  const offset = start.getDay();
-  const cells = Array.from({ length: 42 }, (_, i) => {
-    const d = new Date(month.getFullYear(), month.getMonth(), i - offset + 1);
-    return d;
-  });
-  const todayYmd = datePickerFormat(new Date());
-  const selectedYmd = selected ? datePickerFormat(selected) : '';
-
-  const setMonthOffset = (n) => {
-    setMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + n, 1));
-  };
-
-  const choose = (d) => {
-    onChange?.(datePickerFormat(d));
-    setOpen(false);
-  };
-
   return (
-    <div style={{ position: 'relative', ...style }}>
-      <button
-        type="button"
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', ...style }}>
+      <Icon name="calendar" size={12} style={{ position: 'absolute', left: 8, color: 'var(--text-3)', pointerEvents: 'none' }}/>
+      <input
+        type="date"
         data-testid={testId}
         disabled={disabled}
         title={title}
         className="txt"
-        onClick={() => !disabled && setOpen(true)}
+        value={value || ''}
+        onChange={(e) => onChange?.(e.target.value)}
+        placeholder={placeholder}
         style={{
           width: '100%',
           minWidth: 0,
           height: 32,
-          padding: '0 8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
+          padding: '0 8px 0 28px',
           color: value ? 'var(--text)' : 'var(--text-4)',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          textAlign: 'left',
+          cursor: disabled ? 'not-allowed' : 'text',
           fontSize: 12,
           fontFamily: 'var(--font-mono)',
           background: 'var(--surface)',
-        }}>
-        <Icon name="calendar" size={12}/>
-        <span style={{ flex: 1 }}>{value || placeholder}</span>
-        {value && (
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              onChange?.('');
-            }}
-            style={{ color: 'var(--text-4)', fontFamily: 'var(--font-sans)', fontSize: 13 }}>
-            ×
-          </span>
-        )}
-      </button>
-
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 420 }}/>
-          <div
-            onClick={e => e.stopPropagation()}
-            className="fade-in"
-            style={{
-              position: 'absolute',
-              top: 36,
-              left: 0,
-              zIndex: 421,
-              width: 248,
-              padding: 10,
-              background: 'var(--surface)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: 'var(--r-md)',
-              boxShadow: 'var(--sh-pop)',
-              fontFamily: 'var(--font-sans)',
-            }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <button className="btn ghost icon sm" type="button" onClick={() => setMonthOffset(-1)}><Icon name="chevron-left" size={13}/></button>
-              <div className="tabular" style={{ fontSize: 12.5, fontWeight: 600 }}>
-                {month.getFullYear()} 年 {month.getMonth() + 1} 月
-              </div>
-              <button className="btn ghost icon sm" type="button" onClick={() => setMonthOffset(1)}><Icon name="chevron-right" size={13}/></button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, marginBottom: 4 }}>
-              {['日','一','二','三','四','五','六'].map(w => (
-                <div key={w} style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--text-4)', padding: '3px 0' }}>{w}</div>
-              ))}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
-              {cells.map((d) => {
-                const ymd = datePickerFormat(d);
-                const inMonth = d.getMonth() === month.getMonth();
-                const isSelected = selectedYmd === ymd;
-                const isToday = todayYmd === ymd;
-                return (
-                  <button
-                    key={ymd}
-                    type="button"
-                    onClick={() => choose(d)}
-                    className="tabular"
-                    style={{
-                      height: 28,
-                      border: `1px solid ${isSelected ? 'var(--accent)' : isToday ? 'var(--border-strong)' : 'transparent'}`,
-                      borderRadius: 6,
-                      background: isSelected ? 'var(--accent-soft)' : 'transparent',
-                      color: isSelected ? 'var(--accent-text)' : inMonth ? 'var(--text)' : 'var(--text-4)',
-                      cursor: 'pointer',
-                      fontSize: 11.5,
-                      fontWeight: isSelected ? 700 : 500,
-                    }}>
-                    {d.getDate()}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </>
-      )}
+        }}
+      />
     </div>
   );
 }

@@ -7,6 +7,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from supplyai.models.mk import MkReplenishmentRule
 
 
+def _scope_filters(
+    *,
+    tenant_id: int,
+    scope_type: str,
+    mall_id: int | None,
+    msku: str | None,
+) -> list:
+    filters = [
+        MkReplenishmentRule.tenant_id == tenant_id,
+        MkReplenishmentRule.scope_type == scope_type,
+    ]
+    filters.append(
+        MkReplenishmentRule.mall_id.is_(None)
+        if mall_id is None
+        else MkReplenishmentRule.mall_id == mall_id
+    )
+    filters.append(
+        MkReplenishmentRule.msku.is_(None)
+        if msku is None
+        else MkReplenishmentRule.msku == msku
+    )
+    return filters
+
+
 class RuleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -21,12 +45,36 @@ class RuleRepository:
             )
         )
 
+    async def get_by_scope(
+        self,
+        *,
+        tenant_id: int,
+        scope_type: str,
+        mall_id: int | None,
+        msku: str | None,
+    ) -> MkReplenishmentRule | None:
+        """返回同一作用域下最新规则,用于前端无 rule_id 保存时覆盖."""
+        return await self._session.scalar(
+            select(MkReplenishmentRule)
+            .where(
+                *_scope_filters(
+                    tenant_id=tenant_id,
+                    scope_type=scope_type,
+                    mall_id=mall_id,
+                    msku=msku,
+                )
+            )
+            .order_by(desc(MkReplenishmentRule.updated_at))
+            .limit(1)
+        )
+
     async def list_rules(
         self,
         *,
         tenant_id: int,
         scope_types: list[str] | None,
         mall_id: int | None,
+        msku: str | None,
         enabled_only: bool,
         page: int,
         page_size: int,
@@ -36,6 +84,8 @@ class RuleRepository:
             filters.append(MkReplenishmentRule.scope_type.in_(scope_types))
         if mall_id is not None:
             filters.append(MkReplenishmentRule.mall_id == mall_id)
+        if msku is not None:
+            filters.append(MkReplenishmentRule.msku == msku)
         if enabled_only:
             filters.append(MkReplenishmentRule.enabled == 1)
 

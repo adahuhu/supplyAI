@@ -46,6 +46,7 @@ class RuleService:
             tenant_id=req.tenant_id,
             scope_types=req.scope_types,
             mall_id=req.mall_id,
+            msku=req.msku,
             enabled_only=req.enabled_only,
             page=req.page,
             page_size=req.page_size,
@@ -66,11 +67,18 @@ class RuleService:
             if rule is None:
                 raise RuleNotFoundException(req.rule_id)
         else:
-            rule = MkReplenishmentRule(
-                rule_id=_new_rule_id(),
+            rule = await self._repo.get_by_scope(
                 tenant_id=req.tenant_id,
-                source_type="mock",
+                scope_type=req.scope_type,
+                mall_id=req.mall_id,
+                msku=req.msku,
             )
+            if rule is None:
+                rule = MkReplenishmentRule(
+                    rule_id=_new_rule_id(),
+                    tenant_id=req.tenant_id,
+                    source_type="mock",
+                )
 
         rule.scope_type = req.scope_type
         rule.mall_id = req.mall_id
@@ -108,6 +116,30 @@ def _validate_forecast_scope(req: ForecastRuleUpsertRequest) -> None:
             )
 
 
+def _forecast_scope_filters(
+    *,
+    tenant_id: int,
+    scope_type: str,
+    mall_id: int | None,
+    msku: str | None,
+) -> list:
+    filters = [
+        MkForecastRule.tenant_id == tenant_id,
+        MkForecastRule.scope_type == scope_type,
+    ]
+    filters.append(
+        MkForecastRule.mall_id.is_(None)
+        if mall_id is None
+        else MkForecastRule.mall_id == mall_id
+    )
+    filters.append(
+        MkForecastRule.msku.is_(None)
+        if msku is None
+        else MkForecastRule.msku == msku
+    )
+    return filters
+
+
 def _to_forecast_dto(r: MkForecastRule) -> ForecastRuleDTO:
     return ForecastRuleDTO(
         rule_id=r.rule_id,
@@ -138,6 +170,10 @@ class ForecastRuleService:
         filters = [MkForecastRule.tenant_id == req.tenant_id]
         if req.scope_types:
             filters.append(MkForecastRule.scope_type.in_(req.scope_types))
+        if req.mall_id is not None:
+            filters.append(MkForecastRule.mall_id == req.mall_id)
+        if req.msku is not None:
+            filters.append(MkForecastRule.msku == req.msku)
         total = await self._session.scalar(
             select(func.count(MkForecastRule.rule_id)).where(*filters)
         )
@@ -169,12 +205,26 @@ class ForecastRuleService:
             if rule is None:
                 raise RuleNotFoundException(req.rule_id)
         else:
-            rule = MkForecastRule(
-                rule_id=_new_forecast_rule_id(),
-                tenant_id=req.tenant_id,
-                source_type="mock",
+            rule = await self._session.scalar(
+                select(MkForecastRule)
+                .where(
+                    *_forecast_scope_filters(
+                        tenant_id=req.tenant_id,
+                        scope_type=req.scope_type,
+                        mall_id=req.mall_id,
+                        msku=req.msku,
+                    )
+                )
+                .order_by(desc(MkForecastRule.updated_at))
+                .limit(1)
             )
-            self._session.add(rule)
+            if rule is None:
+                rule = MkForecastRule(
+                    rule_id=_new_forecast_rule_id(),
+                    tenant_id=req.tenant_id,
+                    source_type="mock",
+                )
+                self._session.add(rule)
 
         rule.scope_type = req.scope_type
         rule.mall_id = req.mall_id

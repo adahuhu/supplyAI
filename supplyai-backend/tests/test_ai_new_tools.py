@@ -1,4 +1,4 @@
-"""新工具 simulate_logistics_options + simulate_event_demand 测试.
+"""新工具 compare_logistics_options + simulate_event_demand 测试.
 
 覆盖产品验收报告:
   场景 3 — 活动备货模拟(Prime Day 想做到日销 X 单,要备多少货)
@@ -12,13 +12,13 @@ from supplyai.domain.ai.tools import build_tools, execute_tool
 
 def test_new_tools_registered() -> None:
     names = {t.name for t in build_tools()}
-    assert "simulate_logistics_options" in names
+    assert "compare_logistics_options" in names
     assert "simulate_event_demand" in names
 
 
 def test_logistics_tool_schema() -> None:
     tools = {t.name: t for t in build_tools()}
-    schema = tools["simulate_logistics_options"].parameters
+    schema = tools["compare_logistics_options"].parameters
     props = schema["properties"]
     # 必须能传 listing_id / qty / budget
     assert "listing_id" in props
@@ -38,7 +38,7 @@ def test_event_tool_schema() -> None:
 # ─────────────────────────────────────────────
 
 
-async def test_simulate_logistics_returns_multi_plans() -> None:
+async def test_compare_logistics_returns_multi_plans() -> None:
     """返回 plans 数组,每个 plan 含 mode/cost/days/stockout_days."""
     # 拿一个真实 listing_id
     from supplyai.repositories.dashboard_repo import DashboardRepository
@@ -52,7 +52,7 @@ async def test_simulate_logistics_returns_multi_plans() -> None:
         listing_id = rows[0][0].listing_id
 
         out = await execute_tool(
-            "simulate_logistics_options",
+            "compare_logistics_options",
             {"tenant_id": 100228, "listing_id": listing_id, "qty_target": 500},
             session,
         )

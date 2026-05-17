@@ -113,3 +113,37 @@ async def test_skus_list_includes_critical_fields(client: AsyncClient) -> None:
     }
     missing = expected_fields - set(row.keys())
     assert not missing, f"缺少字段:{missing}"
+
+
+async def test_skus_list_keyword_matches_fnsku(client: AsyncClient) -> None:
+    """关键字搜索应覆盖列表可见标识,包含 FNSKU."""
+    first = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "page_size": 1},
+    )
+    assert first.status_code == 200
+    fnsku = first.json()["rows"][0]["fnsku"]
+    assert fnsku
+
+    response = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "keyword": fnsku, "page_size": 50},
+    )
+    assert response.status_code == 200, response.text
+    rows = response.json()["rows"]
+    assert rows, f"FNSKU {fnsku} 应能搜到对应 SKU"
+    assert any(r["fnsku"] == fnsku for r in rows)
+
+
+async def test_skus_list_includes_financial_amount_fields(
+    client: AsyncClient,
+) -> None:
+    """备货计划财务列需要收入、支出、成本、毛利润、毛利率字段."""
+    response = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "page_size": 1},
+    )
+    assert response.status_code == 200
+    row = response.json()["rows"][0]
+    for field in ("revenue_7d", "expense_7d", "cost_7d", "gross_profit_7d", "gross_margin"):
+        assert field in row

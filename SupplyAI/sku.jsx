@@ -654,6 +654,23 @@ function buildForecastV7(baseFutureDaily, futDays, holidays) {
   return result;
 }
 
+function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, startInv, invOverrides) {
+  const demand = buildForecastV7(baseFutureDaily, futDays, holidays);
+  const result = [];
+  let inv = Math.max(0, Number(startInv) || 0);
+  for (let i = 0; i < futDays; i++) {
+    const absDay = i + 1;
+    if (invOverrides[absDay] !== undefined) {
+      inv = Math.max(0, Number(invOverrides[absDay]) || 0);
+    }
+    const wanted = demand[i]?.value || 0;
+    const sold = inv <= 0 ? 0 : Math.min(wanted, inv);
+    inv = Math.max(0, inv - sold);
+    result.push({ ...demand[i], value: Math.round(sold), demand: wanted });
+  }
+  return result;
+}
+
 function buildInventoryV7(startInv, forecastValues, invOverrides) {
   const series = [];
   let inv = startInv;
@@ -669,13 +686,17 @@ function buildInventoryV7(startInv, forecastValues, invOverrides) {
 function TrendPanelV7({ sku }) {
   const [rangeId, setRangeId] = React.useState('30d');
   const [holidays, setHolidays] = React.useState(() => getHolidays());
-  const [invOverrides, setInvOverrides] = React.useState({});
-  const [holidayModalOpen, setHolidayModalOpen] = React.useState(false);
+  const initialInvOverrides = React.useMemo(
+    () => ({ ...(sku.inventoryOverrides || {}) }),
+    [sku.id, sku.listingId, JSON.stringify(sku.inventoryOverrides || {})]
+  );
+  const [invOverrides, setInvOverrides] = React.useState(initialInvOverrides);
+  const [invSaveState, setInvSaveState] = React.useState(null);
   const range = TIME_RANGES_V7.find(r => r.id === rangeId) || TIME_RANGES_V7[1];
   const isLastYear = rangeId === 'lastYear';
   const forecast = React.useMemo(
-    () => buildForecastV7(sku.futureDaily, range.futDays, holidays),
-    [sku.futureDaily, range.futDays, JSON.stringify(holidays)]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, range.futDays, holidays, sku.totalStock, invOverrides),
+    [sku.futureDaily, sku.totalStock, range.futDays, JSON.stringify(holidays), JSON.stringify(invOverrides)]
   );
   const adjAvg = range.futDays > 0
     ? Math.round(forecast.reduce((sum, item) => sum + item.value, 0) / Math.max(1, forecast.length))
@@ -684,6 +705,10 @@ function TrendPanelV7({ sku }) {
   const hasInvOvr = Object.keys(invOverrides).length > 0;
   const visH = holidays.filter(h => !h.isPointOverride && h.toAbs > 0 && h.fromAbs < range.futDays && Math.abs(h.mult - 1) > 0.01);
   const pointOvr = holidays.filter(h => h.isPointOverride);
+
+  React.useEffect(() => {
+    setInvOverrides(initialInvOverrides);
+  }, [initialInvOverrides]);
 
   const syncHolidayList = React.useCallback((next) => {
     const normalized = normalizeHolidayListV7(next);
@@ -790,9 +815,29 @@ function TrendPanelV7({ sku }) {
     }
   }, [holidays, commitHolidayList]);
 
-  const handleInvOverride = (absDay, qty) => {
+  const handleInvOverride = React.useCallback((absDay, qty) => {
     setInvOverrides(prev => ({ ...prev, [absDay]: qty }));
-  };
+    if (!window.api || !window.api.skuInventoryOverrideUpsert || !sku.listingId) return;
+
+    const forecastDate = sku.forecastDates?.[absDay - 1] || fmtYMDV7(dateAddV7(TODAY_V7, absDay));
+    setInvSaveState({ status: 'saving', absDay });
+    window.api.skuInventoryOverrideUpsert({
+      listing_id: sku.listingId,
+      calc_run_id: sku.calcRunId || null,
+      day_offset: absDay,
+      forecast_date: forecastDate,
+      stock_qty: qty,
+      updated_by: 'frontend',
+    }).then(() => {
+      setInvSaveState({ status: 'saved', absDay });
+      setTimeout(() => {
+        setInvSaveState(cur => (cur && cur.status === 'saved' && cur.absDay === absDay ? null : cur));
+      }, 1800);
+    }).catch(err => {
+      console.warn('[skuInventoryOverrideUpsert]', err.message);
+      setInvSaveState({ status: 'error', absDay, message: err.message || '库存点位保存失败' });
+    });
+  }, [sku.listingId, sku.calcRunId]);
 
   return (
     <div>
@@ -821,14 +866,6 @@ function TrendPanelV7({ sku }) {
             重置调整
           </button>
         )}
-        <button
-          data-testid="holiday-manager-open"
-          className="btn sm"
-          style={{ fontSize: 11 }}
-          onClick={() => setHolidayModalOpen(true)}
-        >
-          <Icon name="tag" size={12}/>节日管理
-        </button>
       </div>
 
       <TrendChartV7
@@ -868,6 +905,20 @@ function TrendPanelV7({ sku }) {
             {Object.keys(invOverrides).length} 处库存修改
           </span>
         )}
+        {invSaveState && (
+          <span style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            color: invSaveState.status === 'error' ? 'var(--p1-strong)' : 'var(--text-3)',
+          }}>
+            {invSaveState.status === 'saving'
+              ? '库存点位保存中…'
+              : invSaveState.status === 'saved'
+                ? '库存点位已保存'
+                : `库存点位保存失败：${invSaveState.message}`}
+          </span>
+        )}
         <span style={{ flex: 1 }}/>
         {hasAdj && !isLastYear && (() => {
           const diff = +(adjAvg - sku.futureDaily).toFixed(2);
@@ -894,31 +945,48 @@ function TrendPanelV7({ sku }) {
         <KV k="未来平均日销" v={hasAdj && !isLastYear ? `${(+adjAvg).toFixed(2)} (调后)` : (+sku.futureDaily).toFixed(2)}/>
         <KV k="未来 14 天合计" v={fmt.num(forecast.slice(0, 14).reduce((sum, item) => sum + item.value, 0))}/>
       </div>
-
-      {holidayModalOpen && (
-        <HolidayManagerModal
-          holidays={holidays.filter(h => !h.isPointOverride)}
-          onClose={() => setHolidayModalOpen(false)}
-          onSave={saveHoliday}
-          onDelete={deleteHoliday}
-        />
-      )}
     </div>
   );
 }
 
 function defaultHolidayDraftV7() {
+  const start = fmtYMDV7(dateAddV7(TODAY_V7, 14));
+  const end = fmtYMDV7(dateAddV7(TODAY_V7, 17));
   return normalizeHolidayV7({
     id: `custom-holiday-${Date.now()}`,
     name: '',
     flag: '🎯',
-    peak: fmtYMDV7(dateAddV7(TODAY_V7, 14)),
-    sb: 7,
-    sa: 3,
+    peak: start,
+    sb: 0,
+    sa: Math.max(0, dateDiffV7(holidayPeakDateV7(start), holidayPeakDateV7(end))),
     mult: 1.3,
     color: HOLIDAY_COLORS_V7[0],
     countryCode: '',
   });
+}
+
+function holidayStartYMDV7(h) {
+  const peak = holidayPeakDateV7(h.peak || h.peak_date);
+  if (!peak) return '';
+  return fmtYMDV7(dateAddV7(peak, -Math.max(0, Number(h.sb ?? h.days_before ?? 0) || 0)));
+}
+
+function holidayEndYMDV7(h) {
+  const peak = holidayPeakDateV7(h.peak || h.peak_date);
+  if (!peak) return '';
+  return fmtYMDV7(dateAddV7(peak, Math.max(0, Number(h.sa ?? h.days_after ?? 0) || 0)));
+}
+
+function holidayRangePatchV7(startYmd, endYmd) {
+  const start = holidayPeakDateV7(startYmd);
+  const end = holidayPeakDateV7(endYmd);
+  if (!start || !end) return null;
+  const safeEnd = end < start ? start : end;
+  return {
+    peak: fmtYMDV7(start),
+    sb: 0,
+    sa: Math.max(0, dateDiffV7(start, safeEnd)),
+  };
 }
 
 function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
@@ -926,10 +994,6 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
   const [form, setForm] = React.useState(() => defaultHolidayDraftV7());
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
-  const countryOptions = (window.FILTERS_DATA?.countries || []).map(c => ({
-    value: c.value || c.code || '',
-    label: c.label || c.name || c.value || c.code || '',
-  }));
   const sorted = normalizeHolidayListV7(holidays);
 
   const startCreate = () => {
@@ -949,9 +1013,21 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
     setForm(prev => normalizeHolidayV7({ ...prev, [key]: value }));
   };
 
+  const setRange = (key, value) => {
+    setForm(prev => {
+      const curStart = holidayStartYMDV7(prev);
+      const curEnd = holidayEndYMDV7(prev);
+      const patch = holidayRangePatchV7(
+        key === 'start' ? value : curStart,
+        key === 'end' ? value : curEnd
+      );
+      return patch ? normalizeHolidayV7({ ...prev, ...patch }) : prev;
+    });
+  };
+
   const validate = () => {
     if (!form.name.trim()) return '请填写节日名称';
-    if (!holidayPeakDateV7(form.peak)) return '请选择有效日期';
+    if (!holidayStartYMDV7(form) || !holidayEndYMDV7(form)) return '请选择有效节日时间';
     if (Number(form.mult) <= 0) return '销量系数必须大于 0';
     return '';
   };
@@ -993,7 +1069,7 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
   };
 
   return (
-    <Modal open={true} onClose={onClose} width={980}>
+    <Modal open={true} onClose={onClose} width={920}>
       <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ flex: 1 }}>
           <div className="h3">节日信息管理</div>
@@ -1005,16 +1081,14 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
         <button className="btn ghost icon sm" onClick={onClose}><Icon name="x" size={14}/></button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) 360px', minHeight: 500, maxHeight: 'calc(100vh - 150px)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 1fr) 340px', minHeight: 460, maxHeight: 'calc(100vh - 150px)' }}>
         <div style={{ overflow: 'auto', borderRight: '1px solid var(--border)' }}>
           <table className="t" style={{ minWidth: 0 }}>
             <thead>
               <tr>
                 <th>节日</th>
-                <th>日期</th>
-                <th className="num">窗口</th>
+                <th>节日时间</th>
                 <th className="num">系数</th>
-                <th>国家</th>
                 <th style={{ width: 92 }}>操作</th>
               </tr>
             </thead>
@@ -1028,10 +1102,8 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
                       <span style={{ fontWeight: 500 }}>{h.name}</span>
                     </div>
                   </td>
-                  <td className="tabular">{h.peak}</td>
-                  <td className="num tabular">前 {h.sb} / 后 {h.sa}</td>
+                  <td className="tabular">{holidayStartYMDV7(h)} 至 {holidayEndYMDV7(h)}</td>
                   <td className="num tabular">x{Number(h.mult).toFixed(2)}</td>
-                  <td>{h.countryCode || '全部'}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button className="btn ghost icon sm" title="编辑" onClick={() => startEdit(h)}><Icon name="edit" size={12}/></button>
@@ -1041,7 +1113,7 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
                 </tr>
               ))}
               {!sorted.length && (
-                <tr><td colSpan="6" style={{ color: 'var(--text-3)', textAlign: 'center', padding: 28 }}>暂无节日配置</td></tr>
+                <tr><td colSpan="4" style={{ color: 'var(--text-3)', textAlign: 'center', padding: 28 }}>暂无节日配置</td></tr>
               )}
             </tbody>
           </table>
@@ -1051,7 +1123,7 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
           <div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{editingId ? '编辑节日' : '新建节日'}</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 3 }}>
-              影响窗口内预测日销会乘以节日系数。
+              只维护节日明细和节日时间；时间范围内预测日销会乘以节日系数。
             </div>
           </div>
 
@@ -1061,34 +1133,26 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
               onChange={e => setField('name', e.target.value)}/>
           </label>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 86px', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-              <span style={{ color: 'var(--text-3)' }}>峰值日期</span>
+              <span style={{ color: 'var(--text-3)' }}>开始时间</span>
               <DatePicker
-                value={form.peak}
-                onChange={(value) => setField('peak', value)}
-                placeholder="选择日期"
-                title="峰值日期"
-                testId="holiday-peak"
+                value={holidayStartYMDV7(form)}
+                onChange={(value) => setRange('start', value)}
+                placeholder="开始日期"
+                title="开始时间"
+                testId="holiday-start"
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-              <span style={{ color: 'var(--text-3)' }}>标识</span>
-              <input data-testid="holiday-flag" className="txt" value={form.flag} maxLength={4}
-                onChange={e => setField('flag', e.target.value)}/>
-            </label>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-              <span style={{ color: 'var(--text-3)' }}>提前天数</span>
-              <input data-testid="holiday-before" className="txt" type="number" min={0} max={180} value={form.sb}
-                onChange={e => setField('sb', e.target.value)}/>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-              <span style={{ color: 'var(--text-3)' }}>延后天数</span>
-              <input data-testid="holiday-after" className="txt" type="number" min={0} max={180} value={form.sa}
-                onChange={e => setField('sa', e.target.value)}/>
+              <span style={{ color: 'var(--text-3)' }}>结束时间</span>
+              <DatePicker
+                value={holidayEndYMDV7(form)}
+                onChange={(value) => setRange('end', value)}
+                placeholder="结束日期"
+                title="结束时间"
+                testId="holiday-end"
+              />
             </label>
           </div>
 
@@ -1103,28 +1167,6 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
                 style={{ width: 88, textAlign: 'right' }}/>
             </div>
           </label>
-
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
-            <span style={{ color: 'var(--text-3)' }}>适用国家</span>
-            <select data-testid="holiday-country" className="sel" value={form.countryCode || ''} onChange={e => setField('countryCode', e.target.value)}>
-              <option value="">全部国家</option>
-              {countryOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </label>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ color: 'var(--text-3)', fontSize: 12 }}>色带颜色</span>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {HOLIDAY_COLORS_V7.map(color => (
-                <button key={color} title={color} onClick={() => setField('color', color)}
-                  style={{
-                    width: 24, height: 24, borderRadius: 6, cursor: 'pointer',
-                    border: `2px solid ${form.color === color ? 'var(--text)' : 'transparent'}`,
-                    background: color,
-                  }}/>
-              ))}
-            </div>
-          </div>
 
           {error && <div style={{ color: 'var(--p1-strong)', fontSize: 12 }}>{error}</div>}
 
@@ -1155,8 +1197,8 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
     return extendHistoryV7(raw, histDays, sku.id.charCodeAt(0));
   }, [sku.id, histDays]);
   const forecast = React.useMemo(
-    () => buildForecastV7(sku.futureDaily, futDays, holidays),
-    [sku.futureDaily, futDays, JSON.stringify(holidays)]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, futDays, holidays, sku.totalStock, invOverrides),
+    [sku.futureDaily, sku.totalStock, futDays, JSON.stringify(holidays), JSON.stringify(invOverrides)]
   );
   const futVals = forecast.map(f => f.value);
   const invSeries = React.useMemo(
@@ -1596,7 +1638,7 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
                   ))}
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--text-4)' }}>
-                  修改后库存趋势曲线从该点重新计算
+                  确认后保存库存点位，并从该点重新计算库存趋势
                 </div>
               </>
             )}
@@ -1881,6 +1923,9 @@ function DetailStat({ label, main, sub, hint, last }) {
 }
 
 const LOGISTICS_LABEL = {
+  fba_working: 'FBA 计划入库',
+  fba_shipped: 'FBA 已发货',
+  fba_receiving: 'FBA 入库中',
   sea: '海派', sea_express: '快船', sea_air_express: '空派',
   purchase: '采购', transfer: '调拨', processing: '加工', local_receiving: '本地入库',
   air: '空运',
@@ -1975,4 +2020,10 @@ function CalcRow({ k, v, highlight, last }) {
   );
 }
 
-Object.assign(window, { SKUDetail });
+Object.assign(window, {
+  SKUDetail,
+  HolidayManagerModal,
+  getHolidays,
+  setGlobalHolidaysV7,
+  normalizeHolidayV7,
+});

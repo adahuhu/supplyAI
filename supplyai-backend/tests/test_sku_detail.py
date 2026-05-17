@@ -54,6 +54,28 @@ async def test_skus_detail_includes_inbound_list(client: AsyncClient) -> None:
     assert isinstance(data["inbound_list"], list)
 
 
+async def test_skus_detail_expands_fba_inbound_breakdown(
+    client: AsyncClient,
+) -> None:
+    """FBA 在途库存应能展开为 working/shipped/receiving 明细."""
+    response = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "page_size": 48},
+    )
+    assert response.status_code == 200
+    row = next(r for r in response.json()["rows"] if (r.get("fba_inbound") or 0) > 0)
+
+    detail = await client.post(
+        "/api/supplyai/skus/detail",
+        json={"tenant_id": 100228, "listing_id": row["id"]},
+    )
+    assert detail.status_code == 200, detail.text
+    inbound = detail.json()["inbound_list"]
+    assert any(
+        item["inbound_type"].startswith("fba_") for item in inbound
+    ), "FBA 平台在途需要拆成可展示明细"
+
+
 async def test_skus_detail_calc_run_id_consistent(client: AsyncClient) -> None:
     """详情各部分 calc_run_id 一致."""
     listing_id = await _pick_listing_id(client)

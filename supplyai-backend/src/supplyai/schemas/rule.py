@@ -13,6 +13,7 @@ class RuleListRequest(BaseModel):
     tenant_id: int
     scope_types: list[ScopeType] | None = None
     mall_id: int | None = None
+    msku: str | None = None
     enabled_only: bool = False
     page: int = 1
     page_size: int = 50
@@ -45,7 +46,7 @@ class RuleListResponse(BaseModel):
 
 class RuleUpsertRequest(BaseModel):
     tenant_id: int
-    rule_id: str | None = None  # 不传 = 新建
+    rule_id: str | None = None  # 不传 = 按作用域覆盖；未命中才新建
     scope_type: ScopeType
     mall_id: int | None = None
     msku: str | None = None
@@ -90,6 +91,8 @@ class ForecastRuleDTO(BaseModel):
 class ForecastRuleListRequest(BaseModel):
     tenant_id: int
     scope_types: list[ScopeType] | None = None
+    mall_id: int | None = None
+    msku: str | None = None
     page: int = 1
     page_size: int = 50
 

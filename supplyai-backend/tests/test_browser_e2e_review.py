@@ -57,7 +57,8 @@ def test_q1_topbar_no_backend_connected_label(page: Page) -> None:
 # ════════════════════════════════════════════════════════
 # Q2 — 采购计划按钮文案
 # ════════════════════════════════════════════════════════
-def test_q2_create_po_modal_cta_copy(page: Page) -> None:
+def test_q2_create_po_navigates_to_drafts(page: Page) -> None:
+    """Q2: 勾选后点"生成采购计划"应跳转到采购计划页(drafts)."""
     _wait_dashboard(page)
     _goto_list(page)
     rows = page.locator("table.t tbody tr")
@@ -65,13 +66,8 @@ def test_q2_create_po_modal_cta_copy(page: Page) -> None:
     rows.first.locator("input[type=checkbox]").check()
     # 点击 batch action bar 里"生成采购计划（1）"按钮
     page.locator("button.btn.primary").filter(has_text="生成采购计划").first.click()
-    # CreatePOModal 标题区出现
-    expect(page.locator("div.h2", has_text="生成采购计划")).to_be_visible(timeout=10_000)
-    # 主 CTA 文案"生成采购计划"(不再是"生成 N 条草稿,跳转")
-    cta = page.locator("button.btn.primary", has_text="生成采购计划")
-    expect(cta.last).to_be_visible(timeout=5_000)
-    # 文案不应含"跳转"
-    assert "跳转" not in cta.last.inner_text()
+    # 应跳转到采购计划创建页(section 内的标题 div)
+    expect(page.locator("section").get_by_text("创建采购计划")).to_be_visible(timeout=10_000)
 
 
 # ════════════════════════════════════════════════════════
