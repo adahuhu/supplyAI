@@ -160,7 +160,13 @@ class SmartDecisionService:
             return
 
         text = req.messages[-1].content
-        scenario, method = await self._classify(text)
+
+        # 多轮对话(有 assistant 回复)视为追问,跳过场景分类直接走 chat
+        has_prior_context = any(m.role == "assistant" for m in req.messages)
+        scenario: str | None = None
+        method = ""
+        if not has_prior_context:
+            scenario, method = await self._classify(text)
 
         if scenario:
             yield {"type": "classify", "scenario": scenario, "method": method}
