@@ -109,3 +109,20 @@ def test_resolve_lead_time_sums_components() -> None:
     )
     out = resolve_rule(rules=[rule], mall_id=1001, msku="MSKU-X")
     assert out.lead_time_days == 28
+
+
+def test_resolve_lead_time_includes_longest_logistics() -> None:
+    rule = ReplenishmentRule(
+        rule_id="r-logistics",
+        scope_type="global",
+        mall_id=None,
+        msku=None,
+        safety_days=10,
+        purchase_duration_days=5,
+        delivery_days=7,
+        qc_days=3,
+        enabled=True,
+        logistics_days=(18, 35, 8),
+    )
+    out = resolve_rule(rules=[rule], mall_id=1001, msku="MSKU-X")
+    assert out.lead_time_days == 50

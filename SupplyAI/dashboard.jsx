@@ -242,9 +242,26 @@ function nextHolidayFromData(asOf) {
 function holidayRelatedSkus(holiday, skus = SKUS) {
   if (!holiday) return [];
   const countryCode = holiday.countryCode || null;
+  const normalize = (v) => String(v || '').toLowerCase().replace(/[\s_\-]+/g, '');
+  const holidayName = String(holiday.name || '');
+  const keys = [
+    holiday.id,
+    holiday.name,
+    '大促',
+    holidayName.toLowerCase().includes('promo') ? 'promo' : '',
+    holidayName.toLowerCase().includes('prime') ? 'Prime Day' : '',
+    holidayName.toLowerCase().includes('memorial') ? 'Memorial Day' : '',
+  ].map(normalize).filter(Boolean);
   return skus
     .filter(s => !countryCode || s.country?.code === countryCode)
-    .filter(s => s.suggest || s.priority === 'p1' || s.priority === 'p2')
+    .filter(s => {
+      const tags = [
+        ...(s.tags || []),
+        ...(s.listingTags || []),
+        s.labelIds,
+      ].flatMap(v => String(v || '').split(/[,，;；|\/]+/)).map(normalize).filter(Boolean);
+      return tags.some(tag => keys.some(key => tag.includes(key) || key.includes(tag)));
+    })
     .sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9)
       || (a.stockoutDate?.getTime?.() || 0) - (b.stockoutDate?.getTime?.() || 0));
 }
@@ -617,7 +634,7 @@ function HolidaySkuPage({ holidayId, setRoute, openCreatePO }) {
 
       <Panel
         title="大促关联 SKU"
-        sub="按国家/站点和当前补货风险关联，点击行进入 SKU 分析"
+        sub="按 SKU 标签和国家/站点关联，点击行进入 SKU 分析"
         right={
           <button className="btn sm primary" onClick={() => openCreatePO(rows.filter(s => s.suggest).map(s => s.id))} disabled={!rows.some(s => s.suggest)}>
             <Icon name="lightning" size={12}/>生成采购计划
@@ -635,6 +652,7 @@ function HolidaySkuPage({ holidayId, setRoute, openCreatePO }) {
                 <tr>
                   <th>SKU</th>
                   <th>MSKU</th>
+                  <th>标签</th>
                   <th>店铺 / 国家</th>
                   <th>风险</th>
                   <th className="num">未来日销</th>
@@ -657,6 +675,13 @@ function HolidaySkuPage({ holidayId, setRoute, openCreatePO }) {
                       </div>
                     </td>
                     <td className="mono" style={{ color: 'var(--text-2)' }}>{s.msku}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 180 }}>
+                        {(s.tags || []).slice(0, 3).map(tag => (
+                          <span key={tag} className="chip" style={{ height: 20, fontSize: 10.5 }}>{tag}</span>
+                        ))}
+                      </div>
+                    </td>
                     <td>{s.country.flag} {s.store}</td>
                     <td><PriorityBadge level={s.priority}/></td>
                     <td className="num tabular">{s.futureDaily}</td>

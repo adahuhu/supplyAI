@@ -39,6 +39,7 @@ class SkuSeed:
     product_name: str
     category: str
     brand: str
+    label_ids: str
     item_name: str  # listing 标题(亚马逊页面)
     image_url: str
 
@@ -111,6 +112,32 @@ def _gen_image_url(idx: int, msku: str) -> str:
     suffix = msku[-3:]
     color = "f1f5f9" if idx % 2 else "e2e8f0"
     return f"https://placehold.co/96x96/{color}/64748b?text={suffix}"
+
+
+def _gen_label_ids(idx: int, country_code: str, risk: str) -> str:
+    """生成更接近真实运营场景的 SKU 标签."""
+    profile_labels = [
+        ["大促", "爆款", "高复购"],
+        ["新品", "首批备货", "高毛利"],
+        ["大促", "Prime Day", "季节款", "夏季"],
+        ["清仓", "尾货", "低动销"],
+        ["大促", "Prime Day", "礼品款", "节日礼盒"],
+        ["低库存", "补货关注"],
+        ["大促", "高毛利", "广告款"],
+        ["长尾", "稳定款"],
+        ["大促", "Prime Day", "套装款", "组合销售"],
+        ["新品", "测款", "潜力款"],
+        ["清仓", "降价款"],
+        ["大促", "Prime Day", "黑五预备"],
+    ]
+    labels = list(profile_labels[idx % len(profile_labels)])
+    if country_code == "US" and "大促" in labels:
+        labels.insert(1, "Memorial Day")
+    if risk == "p1" and "低库存" not in labels:
+        labels.append("低库存")
+    if risk == "p2" and "补货关注" not in labels:
+        labels.append("补货关注")
+    return ",".join(dict.fromkeys(labels))
 
 
 def _build_risk_targets() -> list[str]:
@@ -237,6 +264,7 @@ def generate_skus() -> list[SkuSeed]:
         owner = OWNERS[i % len(OWNERS)]
         product_name, category, brand = PRODUCTS[i % len(PRODUCTS)]
         risk = risk_targets[i]
+        label_ids = _gen_label_ids(i, store["country_code"], risk)
 
         msku = _gen_msku(i)
         listing_id = 1000000 + i  # BIGINT, URL safe
@@ -275,6 +303,7 @@ def generate_skus() -> list[SkuSeed]:
             product_name=product_name,
             category=category,
             brand=brand,
+            label_ids=label_ids,
             item_name=f"{brand} {product_name} - {store['country']}",
             image_url=_gen_image_url(i, msku),
             mall_id=store["mall_id"],

@@ -125,6 +125,66 @@ async def test_upsert_reuses_existing_scope_when_rule_id_missing(
     assert rows[0]["safety_days"] == 33
 
 
+async def test_upsert_persists_logistics_methods_for_reopen(
+    client: AsyncClient,
+) -> None:
+    body = {
+        "tenant_id": 100228,
+        "scope_type": "sku",
+        "mall_id": 909003,
+        "msku": "RULE-PERSIST-LOGISTICS-001",
+        "safety_days": 16,
+        "purchase_duration_days": 4,
+        "delivery_days": 6,
+        "qc_days": 2,
+        "logistics_methods": [
+            {"mode": "海运", "days": 35},
+            {"mode": "空运", "days": 8},
+        ],
+        "enabled": True,
+        "updated_by": "pytest",
+    }
+    first = await client.post("/api/supplyai/rules/upsert", json=body)
+    assert first.status_code == 200, first.text
+    first_data = first.json()
+    assert first_data["logistics_methods"] == [
+        {"mode": "海运", "days": 35},
+        {"mode": "空运", "days": 8},
+    ]
+
+    second = await client.post(
+        "/api/supplyai/rules/upsert",
+        json={
+            **body,
+            "logistics_methods": [
+                {"mode": "快船", "days": 18},
+                {"mode": "快递", "days": 5},
+            ],
+        },
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["rule_id"] == first_data["rule_id"]
+
+    listed = await client.post(
+        "/api/supplyai/rules/list",
+        json={
+            "tenant_id": 100228,
+            "scope_types": ["sku"],
+            "mall_id": 909003,
+            "msku": "RULE-PERSIST-LOGISTICS-001",
+            "enabled_only": True,
+        },
+    )
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()["rows"]
+    assert len(rows) == 1
+    assert rows[0]["rule_id"] == first_data["rule_id"]
+    assert rows[0]["logistics_methods"] == [
+        {"mode": "快船", "days": 18},
+        {"mode": "快递", "days": 5},
+    ]
+
+
 async def test_forecast_upsert_reuses_existing_scope_when_rule_id_missing(
     client: AsyncClient,
 ) -> None:

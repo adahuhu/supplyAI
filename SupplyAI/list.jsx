@@ -3,6 +3,7 @@
 const LIST_SORT_ACCESSORS = {
   product: s => s.name || '',
   sku: s => s.sku || '',
+  tags: s => (s.tags || []).join(','),
   store: s => s.store || '',
   status: s => s.status || '',
   priority: s => PRIORITY_ORDER[s.priority] ?? 99,
@@ -139,6 +140,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
         || (s.fnsku || '').toLowerCase().includes(kw)
         || (s.name || '').toLowerCase().includes(kw)
         || (s.store || '').toLowerCase().includes(kw)
+        || (s.tags || []).some(tag => String(tag).toLowerCase().includes(kw))
       );
     }
     if (storeFilter) rows = rows.filter(s => String(s.mallId) === storeFilter);
@@ -387,7 +389,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <table className="t" style={{ minWidth: 1960 }}>
+        <table className="t" style={{ minWidth: 2080 }}>
           <thead>
             <tr>
               <th style={{ width: 36, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 3, boxShadow: '1px 0 0 var(--border)' }}>
@@ -395,6 +397,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
               </th>
 	              <SortTh id="product" style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 3, minWidth: 280, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>商品</SortTh>
 	              <SortTh id="sku">SKU</SortTh>
+	              <SortTh id="tags">标签</SortTh>
 	              <SortTh id="store">店铺/国家</SortTh>
 	              <SortTh id="status">状态</SortTh>
 	              <SortTh id="priority">风险</SortTh>
@@ -446,6 +449,13 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                   <td className="mono" style={{ fontSize: 11.5 }}>
                     <div style={{ color: 'var(--text-2)', fontWeight: 500 }}>{s.sku || '—'}</div>
                     <div style={{ color: 'var(--text-4)', marginTop: 2 }}>FNSKU {s.fnsku || '—'}</div>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', minWidth: 120, maxWidth: 180 }}>
+                      {(s.tags && s.tags.length) ? s.tags.slice(0, 3).map(tag => (
+                        <span key={tag} className="chip" style={{ height: 20, fontSize: 10.5, maxWidth: 86, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tag}</span>
+                      )) : <span style={{ color: 'var(--text-4)' }}>—</span>}
+                    </div>
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -513,6 +523,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 	            <tr>
 	              <td style={{ position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 2, boxShadow: '1px 0 0 var(--border)' }} />
 	              <td style={{ position: 'sticky', left: 36, background: 'var(--surface)', zIndex: 2, fontWeight: 600, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>合计 · {filtered.length}</td>
+	              <td />
 	              <td />
 	              <td />
 	              <td />

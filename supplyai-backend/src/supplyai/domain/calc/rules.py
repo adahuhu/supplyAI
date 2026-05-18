@@ -1,7 +1,7 @@
 """Rule Resolver — 三层作用范围匹配纯函数.
 
 scope_type 优先级: sku > store > global > default
-lead_time_days = purchase_duration + delivery + qc
+lead_time_days = purchase_duration + delivery + qc + max(logistics_days)
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ class ReplenishmentRule:
     delivery_days: int
     qc_days: int
     enabled: bool
+    logistics_days: tuple[int, ...] = ()
 
 
 @dataclass
@@ -50,7 +51,13 @@ def _matches(rule: ReplenishmentRule, mall_id: int | None, msku: str) -> bool:
 
 
 def _lead_time(rule: ReplenishmentRule) -> int:
-    return rule.purchase_duration_days + rule.delivery_days + rule.qc_days
+    logistics_days = max(rule.logistics_days, default=0)
+    return (
+        rule.purchase_duration_days
+        + rule.delivery_days
+        + rule.qc_days
+        + logistics_days
+    )
 
 
 def resolve_rule(

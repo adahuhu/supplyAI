@@ -102,6 +102,39 @@ class AiOrchestrator:
         )
         return "\n".join(parts)
 
+    @staticmethod
+    def _cap_fallback_text() -> str:
+        return (
+            "我已经读取了可用数据，但本轮工具调用达到保护上限。"
+            "请先基于上方已展示的风险卡片和工具结果处理最高优先级项；"
+            "如需继续追问，可以直接问某一个 SKU、某个店铺或某个动作。"
+        )
+
+    def _summarize_after_cap(self, msgs: list[ChatMessage]) -> str:
+        """达到工具上限后,只用已返回的 tool JSON 生成确定性摘要.
+
+        不再调用 LLM,避免模型在"总结已有结果"时扩写或编造数字。
+        """
+        summaries: list[str] = []
+        for msg in msgs:
+            if msg.role != "tool" or not msg.content:
+                continue
+            try:
+                payload = json.loads(msg.content)
+            except json.JSONDecodeError:
+                continue
+            summary = _deterministic_tool_summary(payload)
+            if summary:
+                summaries.append(summary)
+        if not summaries:
+            return self._cap_fallback_text()
+        # 保留最后几次工具结果,避免长对话里重复堆叠旧数据。
+        return (
+            "本轮已达到工具调用保护上限，我先基于已经查到的确定数据给出结论：\n"
+            + "\n".join(f"{i + 1}. {text}" for i, text in enumerate(summaries[-3:]))
+            + "\n如需继续深入，请直接指定某个 SKU、店铺或动作，我会基于该对象继续查询。"
+        )
+
     async def run(self, user_messages: list[ChatMessage]) -> OrchestratorOutput:
         msgs: list[ChatMessage] = [
             ChatMessage(role="system", content=self._system_prompt),
@@ -145,10 +178,11 @@ class AiOrchestrator:
 
         # 命中 max_iterations 上限
         logger.warning("ai_orchestrator_capped iterations=%d", iterations)
+        content = self._summarize_after_cap(msgs)
         return OrchestratorOutput(
-            content=last_content or "[已达工具调用上限,请简化提问]",
+            content=content or last_content or self._cap_fallback_text(),
             tool_iterations=iterations,
-            finish_reason="length",
+            finish_reason="stop",
         )
 
     async def run_stream(
@@ -240,13 +274,14 @@ class AiOrchestrator:
             iterations += 1
 
         logger.warning("ai_orchestrator_stream_capped iterations=%d", iterations)
+        content = self._summarize_after_cap(msgs)
         yield {
             "type": "delta",
-            "text": "[已达工具调用上限,请简化提问]",
+            "text": content,
         }
         yield {
             "type": "done",
-            "finish_reason": "length",
+            "finish_reason": "stop",
             "tool_iterations": iterations,
         }
 
@@ -262,3 +297,99 @@ def _short_tool_summary(name: str, result: Any) -> str:
     if isinstance(result, list):
         return f"返回 {len(result)} 条"
     return "完成"
+
+
+def _deterministic_tool_summary(payload: Any) -> str:
+    """从工具 JSON 中抽取确定字段生成保守摘要."""
+    if not isinstance(payload, dict):
+        return ""
+    if payload.get("error"):
+        return f"有一次工具查询失败:{payload['error']}"
+
+    rows = payload.get("rows")
+    if isinstance(rows, list):
+        total = payload.get("total", len(rows))
+        if not rows:
+            return f"查询返回 0 条记录,总数 {total}。"
+        bits = [f"查询到 {len(rows)} 条记录,总数 {total}"]
+        top = rows[:3]
+        item_texts = []
+        for row in top:
+            if not isinstance(row, dict):
+                continue
+            sku = row.get("sku") or row.get("msku") or row.get("title") or row.get("name")
+            risk = row.get("priority") or row.get("risk_level")
+            fba_days = (
+                row.get("fba_sellable_days")
+                or row.get("fba_sellable")
+                or row.get("sellable_days")
+            )
+            suggest_qty = row.get("suggest_qty") or row.get("suggested_qty")
+            parts = [str(sku)] if sku else []
+            if risk:
+                parts.append(f"风险 {risk}")
+            if fba_days is not None:
+                parts.append(f"FBA 可售 {fba_days} 天")
+            if suggest_qty is not None:
+                parts.append(f"建议采购 {suggest_qty}")
+            if parts:
+                item_texts.append("、".join(parts))
+        if item_texts:
+            bits.append("Top 项: " + "; ".join(item_texts))
+        calc_run_id = payload.get("calc_run_id")
+        if calc_run_id:
+            bits.append(f"计算批次 {calc_run_id}")
+        return "；".join(bits) + "。"
+
+    summary = payload.get("summary")
+    if isinstance(summary, dict):
+        msku = summary.get("msku") or summary.get("sku")
+        risk = summary.get("priority") or summary.get("risk_level")
+        fba_days = summary.get("fba_sellable_days") or summary.get("fba_sellable")
+        suggest_qty = summary.get("suggest_qty") or summary.get("suggested_qty")
+        parts = []
+        if msku:
+            parts.append(f"SKU {msku}")
+        if risk:
+            parts.append(f"风险 {risk}")
+        if fba_days is not None:
+            parts.append(f"FBA 可售 {fba_days} 天")
+        if suggest_qty is not None:
+            parts.append(f"建议采购 {suggest_qty}")
+        if parts:
+            return "；".join(parts) + "。"
+
+    plans = payload.get("plans")
+    if isinstance(plans, list) and plans:
+        plan_texts = []
+        for plan in plans[:3]:
+            if not isinstance(plan, dict):
+                continue
+            mode = plan.get("mode")
+            days = plan.get("days")
+            cost = plan.get("estimated_cost")
+            parts = [str(mode)] if mode else []
+            if days is not None:
+                parts.append(f"{days} 天")
+            if cost is not None:
+                parts.append(f"预估成本 {cost}")
+            if parts:
+                plan_texts.append("、".join(parts))
+        if plan_texts:
+            return "物流方案对比: " + "; ".join(plan_texts) + "。"
+
+    status = payload.get("status")
+    if status == "needs_confirmation":
+        preview = payload.get("preview") or {}
+        return (
+            f"采购计划仍需二次确认:共 {preview.get('item_count', 0)} 项,"
+            f"总数量 {preview.get('total_qty', 0)}。"
+        )
+    if status == "created":
+        return f"采购计划已创建 {payload.get('created_count', 0)} 条。"
+
+    note = payload.get("note")
+    if isinstance(note, str) and note:
+        return note
+
+    return ""

@@ -1,10 +1,10 @@
 """规则仓储."""
 from __future__ import annotations
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from supplyai.models.mk import MkReplenishmentRule
+from supplyai.models.mk import MkReplenishmentRule, MkRuleLogisticsMethod
 
 
 def _scope_filters(
@@ -102,6 +102,44 @@ class RuleRepository:
             )
         ).scalars().all()
         return list(rows), int(total or 0)
+
+    async def list_logistics_methods(
+        self, rule_ids: list[str]
+    ) -> dict[str, list[MkRuleLogisticsMethod]]:
+        if not rule_ids:
+            return {}
+        result = await self._session.execute(
+            select(MkRuleLogisticsMethod)
+            .where(
+                MkRuleLogisticsMethod.rule_id.in_(rule_ids),
+                MkRuleLogisticsMethod.is_active == 1,
+            )
+            .order_by(MkRuleLogisticsMethod.rule_id.asc(), MkRuleLogisticsMethod.id.asc())
+        )
+        out: dict[str, list[MkRuleLogisticsMethod]] = {}
+        for row in result.scalars().all():
+            out.setdefault(row.rule_id, []).append(row)
+        return out
+
+    async def replace_logistics_methods(
+        self, rule_id: str, methods: list[tuple[str, int]]
+    ) -> None:
+        await self._session.execute(
+            delete(MkRuleLogisticsMethod).where(MkRuleLogisticsMethod.rule_id == rule_id)
+        )
+        self._session.add_all(
+            [
+                MkRuleLogisticsMethod(
+                    rule_id=rule_id,
+                    logistics_mode=mode,
+                    logistics_days=days,
+                    is_active=1,
+                    source_type="mock",
+                )
+                for mode, days in methods
+            ]
+        )
+        await self._session.flush()
 
     async def upsert(self, rule: MkReplenishmentRule) -> MkReplenishmentRule:
         self._session.add(rule)

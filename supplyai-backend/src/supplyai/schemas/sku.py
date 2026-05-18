@@ -52,6 +52,8 @@ class SkuSummaryDTO(BaseModel):
     image_url: str | None = None  # 详情页用 mk_listing_product_sources 补
     brand: str | None = None
     category: str | None = None
+    label_ids: str | None = None
+    tags: list[str] = Field(default_factory=list)
     owner: str | None = None
     store_name: str | None = None
     country_code: str | None

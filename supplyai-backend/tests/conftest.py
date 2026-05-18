@@ -18,6 +18,7 @@ from supplyai.models.mk import (
     MkForecastRule,
     MkPurchaseDraft,
     MkReplenishmentRule,
+    MkRuleLogisticsMethod,
     MkSkuForecastDaily,
     MkSkuInventoryOverride,
     MkSupplySkuDailyStat,
@@ -58,16 +59,29 @@ async def _cleanup_test_data() -> None:
         await session.execute(
             delete(MkPurchaseDraft).where(MkPurchaseDraft.draft_id.like("DRAFT-%"))
         )
-        await session.execute(
-            delete(MkReplenishmentRule).where(
-                or_(
-                    MkReplenishmentRule.updated_by.in_(
-                        ["pytest", "tester", "e2e", "e2e-test"]
-                    ),
-                    MkReplenishmentRule.msku.like("RULE-PERSIST-%"),
+        test_rule_ids = (
+            await session.execute(
+                select(MkReplenishmentRule.rule_id).where(
+                    or_(
+                        MkReplenishmentRule.updated_by.in_(
+                            ["pytest", "tester", "e2e", "e2e-test"]
+                        ),
+                        MkReplenishmentRule.msku.like("RULE-PERSIST-%"),
+                    )
                 )
             )
-        )
+        ).scalars().all()
+        if test_rule_ids:
+            await session.execute(
+                delete(MkRuleLogisticsMethod).where(
+                    MkRuleLogisticsMethod.rule_id.in_(list(test_rule_ids))
+                )
+            )
+            await session.execute(
+                delete(MkReplenishmentRule).where(
+                    MkReplenishmentRule.rule_id.in_(list(test_rule_ids))
+                )
+            )
         await session.execute(
             delete(MkForecastRule).where(MkForecastRule.updated_by == "pytest")
         )

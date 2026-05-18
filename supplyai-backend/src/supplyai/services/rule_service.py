@@ -15,6 +15,7 @@ from supplyai.schemas.rule import (
     ForecastRuleListResponse,
     ForecastRuleUpsertRequest,
     RuleDTO,
+    RuleLogisticsMethodDTO,
     RuleListRequest,
     RuleListResponse,
     RuleUpsertRequest,
@@ -37,6 +38,44 @@ def _validate_scope(req: RuleUpsertRequest) -> None:
             )
 
 
+def _to_rule_dto(
+    rule: MkReplenishmentRule,
+    logistics_methods: list[RuleLogisticsMethodDTO] | None = None,
+) -> RuleDTO:
+    return RuleDTO(
+        rule_id=rule.rule_id,
+        tenant_id=rule.tenant_id,
+        scope_type=rule.scope_type,
+        mall_id=rule.mall_id,
+        msku=rule.msku,
+        safety_days=rule.safety_days,
+        purchase_duration_days=rule.purchase_duration_days,
+        delivery_days=rule.delivery_days,
+        qc_days=rule.qc_days,
+        rule_version=rule.rule_version,
+        enabled=bool(rule.enabled),
+        updated_by=rule.updated_by,
+        updated_at=rule.updated_at,
+        logistics_methods=logistics_methods or [],
+    )
+
+
+def _normalize_logistics_methods(
+    methods: list[RuleLogisticsMethodDTO] | None,
+) -> list[tuple[str, int]] | None:
+    if methods is None:
+        return None
+    seen: set[str] = set()
+    normalized: list[tuple[str, int]] = []
+    for item in methods:
+        mode = item.mode.strip()
+        if not mode or mode in seen:
+            continue
+        seen.add(mode)
+        normalized.append((mode, max(0, int(item.days))))
+    return normalized
+
+
 class RuleService:
     def __init__(self, repo: RuleRepository) -> None:
         self._repo = repo
@@ -51,8 +90,23 @@ class RuleService:
             page=req.page,
             page_size=req.page_size,
         )
+        logistics_by_rule = await self._repo.list_logistics_methods(
+            [r.rule_id for r in rows]
+        )
         return RuleListResponse(
-            rows=[RuleDTO.model_validate(r) for r in rows],
+            rows=[
+                _to_rule_dto(
+                    r,
+                    [
+                        RuleLogisticsMethodDTO(
+                            mode=m.logistics_mode,
+                            days=m.logistics_days,
+                        )
+                        for m in logistics_by_rule.get(r.rule_id, [])
+                    ],
+                )
+                for r in rows
+            ],
             total=total,
             page=req.page,
             page_size=req.page_size,
@@ -92,14 +146,21 @@ class RuleService:
         rule.updated_by = req.updated_by
 
         await self._repo.upsert(rule)
-        return RuleDTO.model_validate(rule)
+        normalized_methods = _normalize_logistics_methods(req.logistics_methods)
+        if normalized_methods is not None:
+            await self._repo.replace_logistics_methods(rule.rule_id, normalized_methods)
+        methods = [
+            RuleLogisticsMethodDTO(mode=mode, days=days)
+            for mode, days in (normalized_methods or [])
+        ]
+        return _to_rule_dto(rule, methods)
 
     async def disable(self, *, tenant_id: int, rule_id: str) -> RuleDTO:
         rule = await self._repo.get(tenant_id=tenant_id, rule_id=rule_id)
         if rule is None:
             raise RuleNotFoundException(rule_id)
         rule.enabled = 0
-        return RuleDTO.model_validate(rule)
+        return _to_rule_dto(rule)
 
 
 def _new_forecast_rule_id() -> str:

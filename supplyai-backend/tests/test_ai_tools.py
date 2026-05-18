@@ -182,19 +182,24 @@ async def test_orchestrator_executes_tool_call_and_loops() -> None:
 
 
 async def test_orchestrator_max_iterations_caps() -> None:
-    """模型疯狂调工具时,orchestrator 必须有上限保护."""
+    """模型疯狂调工具时,达到上限后应基于工具 JSON 生成确定性摘要."""
     # 永远回 tool_calls 的死循环模型
     looping_resp = ChatResponse(
         content="",
         finish_reason="tool_calls",
         tool_calls=[ToolCall(id="x", name="query_stockout_risk", arguments={"tenant_id": 100228})],
     )
-    client = _ScriptedClient(responses=[looping_resp] * 20)
+    client = _ScriptedClient(responses=[looping_resp, looping_resp, looping_resp])
     async with async_session_factory() as session:
         orch = AiOrchestrator(client, session=session, tenant_id=100228, max_iterations=3)
         out = await orch.run([ChatMessage(role="user", content="x")])
     assert out.tool_iterations == 3
-    assert out.finish_reason in {"length", "tool_calls"}  # 因 cap 退出
+    assert out.finish_reason == "stop"
+    assert "工具调用上限" not in out.content
+    assert "简化提问" not in out.content
+    assert "确定数据" in out.content
+    assert "查询到" in out.content
+    assert len(client.calls) == 3
 
 
 async def test_orchestrator_overrides_model_provided_tenant_id() -> None:

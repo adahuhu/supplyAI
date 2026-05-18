@@ -193,6 +193,7 @@ async def seed_rl_product(session: AsyncSession, skus: list[SkuSeed]) -> None:
                 image_url_px75=sku.image_url,
                 team_id=1,
                 dept_id=1,
+                label_ids=sku.label_ids,
                 created_time=now,
                 updated_time=now,
                 del_flag=0,

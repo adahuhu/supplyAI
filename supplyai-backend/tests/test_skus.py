@@ -106,6 +106,7 @@ async def test_skus_list_includes_critical_fields(client: AsyncClient) -> None:
     expected_fields = {
         "id", "msku", "sku", "asin", "product_name",
         "store_name", "country_code", "priority", "delivery_method",
+        "label_ids", "tags",
         "future_daily", "total_stock", "fba_sellable_days", "sellable_days",
         "stockout_date", "purchase_date", "suggest", "suggest_qty",
         "suggest_amount_base", "base_currency",
@@ -113,6 +114,22 @@ async def test_skus_list_includes_critical_fields(client: AsyncClient) -> None:
     }
     missing = expected_fields - set(row.keys())
     assert not missing, f"缺少字段:{missing}"
+    assert row["label_ids"]
+    assert row["tags"]
+
+
+async def test_skus_list_has_varied_mock_tags(client: AsyncClient) -> None:
+    """演示数据应有多类运营标签,避免所有 SKU 标签相同."""
+    response = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "page_size": 48},
+    )
+    assert response.status_code == 200
+    rows = response.json()["rows"]
+    label_sets = {row["label_ids"] for row in rows}
+    tags = {tag for row in rows for tag in row["tags"]}
+    assert len(label_sets) >= 8
+    assert {"清仓", "爆款", "新品", "大促", "低库存"}.issubset(tags)
 
 
 async def test_skus_list_keyword_matches_fnsku(client: AsyncClient) -> None:

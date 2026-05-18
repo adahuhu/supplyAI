@@ -107,7 +107,11 @@ class CalcService:
         sales_map = await self._repo.sales_history(
             tenant_id=tenant_id, end_date=today, days=HISTORY_DAYS
         )
-        rules = self._to_rule_dataclasses(await self._repo.list_rules(tenant_id))
+        orm_rules = await self._repo.list_rules(tenant_id)
+        logistics_by_rule = await self._repo.rule_logistics_days(
+            [r.rule_id for r in orm_rules]
+        )
+        rules = self._to_rule_dataclasses(orm_rules, logistics_by_rule)
 
         snapshots: list[MkSupplySkuDailyStat] = []
         forecasts: list[MkSkuForecastDaily] = []
@@ -131,7 +135,9 @@ class CalcService:
     @staticmethod
     def _to_rule_dataclasses(
         orm_rules: list[MkReplenishmentRule],
+        logistics_by_rule: dict[str, tuple[int, ...]] | None = None,
     ) -> list[ReplenishmentRule]:
+        logistics_by_rule = logistics_by_rule or {}
         return [
             ReplenishmentRule(
                 rule_id=r.rule_id,
@@ -143,6 +149,7 @@ class CalcService:
                 delivery_days=r.delivery_days,
                 qc_days=r.qc_days,
                 enabled=bool(r.enabled),
+                logistics_days=logistics_by_rule.get(r.rule_id, ()),
             )
             for r in orm_rules
         ]

@@ -47,6 +47,7 @@ class MkSupplySkuDailyStat(Base):
     sku: Mapped[str | None] = mapped_column(String(64))
     asin: Mapped[str | None] = mapped_column(String(16))
     product_name: Mapped[str | None] = mapped_column(String(200))
+    label_ids: Mapped[str | None] = mapped_column(String(255))
     listing_status: Mapped[str | None] = mapped_column(String(20))
     delivery_method: Mapped[str | None] = mapped_column(String(20))  # FBA / FBM
     risk_level: Mapped[str] = mapped_column(String(10))  # p1 / p2 / p3 / safe

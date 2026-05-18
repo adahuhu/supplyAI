@@ -35,6 +35,12 @@ class RuleDTO(BaseModel):
     enabled: bool
     updated_by: str | None
     updated_at: datetime
+    logistics_methods: list["RuleLogisticsMethodDTO"] = Field(default_factory=list)
+
+
+class RuleLogisticsMethodDTO(BaseModel):
+    mode: str
+    days: int
 
 
 class RuleListResponse(BaseModel):
@@ -57,6 +63,7 @@ class RuleUpsertRequest(BaseModel):
     rule_version: str | None = None
     enabled: bool = True
     updated_by: str | None = None
+    logistics_methods: list[RuleLogisticsMethodDTO] | None = None
 
 
 class RuleStateRequest(BaseModel):

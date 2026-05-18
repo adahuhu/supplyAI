@@ -32,6 +32,14 @@
       : [];
   }
 
+  function parseLabelIds(value) {
+    if (Array.isArray(value)) return value.map(x => String(x || '').trim()).filter(Boolean);
+    return String(value || '')
+      .split(/[,，;；|\/]+/)
+      .map(x => x.trim())
+      .filter(Boolean);
+  }
+
   function isRecentStockout7(row) {
     const fba7 = normalizeNumberList(
       row.fba_available_7d || row.fba_available_recent_7d || row.fba_available_history_7d
@@ -51,6 +59,9 @@
       row.fba_available_7d || row.fba_available_recent_7d || row.fba_available_history_7d
     );
     const stockoutRecent7 = isRecentStockout7(row);
+    const tags = (Array.isArray(row.tags) && row.tags.length)
+      ? parseLabelIds(row.tags)
+      : parseLabelIds(row.label_ids);
     return {
       // 标识 — id 用 String(listing_id) 保持路由兼容
       id: String(row.id),
@@ -66,8 +77,9 @@
       image: row.image_url || `https://placehold.co/96x96/e2e8f0/64748b?text=${encodeURIComponent((row.msku || '?').slice(-3))}`,
       brand: row.brand || '',
       line: '',
-      tags: [],
-      listingTags: [],
+      labelIds: row.label_ids || tags.join(','),
+      tags,
+      listingTags: tags,
       store: row.store_name || '—',
       country,
       owner: row.owner || '',

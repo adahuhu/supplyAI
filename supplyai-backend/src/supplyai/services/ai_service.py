@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from datetime import date
 from typing import AsyncIterator
 
@@ -67,7 +68,34 @@ def _sku_card_row(s: SkuSummaryDTO) -> dict:
         "totalStock": s.total_stock,
         "safeDays": s.safety_days,
         "purchaseLeadTime": s.lead_time_days,
+        "labelIds": s.label_ids,
+        "tags": s.tags,
     }
+
+
+def _norm_tag(value: str | None) -> str:
+    return re.sub(r"[\s_\-]+", "", str(value or "").lower())
+
+
+def _sku_matches_holiday_tag(holiday, sku: SkuSummaryDTO) -> bool:
+    if holiday is None:
+        return False
+    name = holiday.name or ""
+    keys = [
+        holiday.id,
+        holiday.name,
+        "大促",
+        "promo" if "promo" in name.lower() else "",
+        "Prime Day" if "prime" in name.lower() else "",
+        "Memorial Day" if "memorial" in name.lower() else "",
+    ]
+    normalized_keys = [_norm_tag(k) for k in keys if _norm_tag(k)]
+    tags = [_norm_tag(t) for t in sku.tags if _norm_tag(t)]
+    return any(
+        tag in key or key in tag
+        for tag in tags
+        for key in normalized_keys
+    )
 
 
 def _rule_impact_row(s: SkuSummaryDTO, *, target_safety_days: int) -> dict:
@@ -447,12 +475,18 @@ class AiService:
             SkuListRequest(
                 tenant_id=req.tenant_id,
                 country_codes=[holiday.country_code] if holiday and holiday.country_code else None,
-                priorities=["p1", "p2", "p3"],
                 page=1,
                 page_size=50,
             )
         )
-        rows = [_sku_card_row(s) for s in page.rows if s.suggest or s.priority in ("p1", "p2")][:6]
+        tagged_skus = [s for s in page.rows if _sku_matches_holiday_tag(holiday, s)]
+        tagged_skus.sort(
+            key=lambda s: (
+                {"p1": 0, "p2": 1, "p3": 2, "safe": 3}.get(s.priority, 9),
+                s.stockout_date or date.max,
+            )
+        )
+        rows = [_sku_card_row(s) for s in tagged_skus[:6]]
         multiplier = float(holiday.sales_multiplier) if holiday else 1.0
         base_demand = sum(float(s.get("coverageDemand") or 0) for s in rows)
         promo_demand = base_demand * multiplier
@@ -469,13 +503,13 @@ class AiService:
             "severity": "p2" if days_until is not None and days_until <= 14 else "p3",
             "title": f"{holiday.flag or ''} {holiday.name}" if holiday else "大促备货",
             "summary": (
-                f"{holiday.name} 距离 {max(0, days_until or 0)} 天，当前关联 {len(rows)} 个风险 SKU。"
+                f"{holiday.name} 距离 {max(0, days_until or 0)} 天，当前通过标签关联 {len(tagged_skus)} 个 SKU。"
                 if holiday else "当前暂无已配置的大促节点。"
             ),
             "holiday": holiday.model_dump(mode="json") if holiday else None,
             "metrics": [
                 {"label": "倒计时", "value": max(0, days_until) if days_until is not None else "—", "unit": "天" if days_until is not None else ""},
-                {"label": "关联 SKU", "value": len(rows), "unit": "个"},
+                {"label": "关联 SKU", "value": len(tagged_skus), "unit": "个"},
                 {"label": "销量系数", "value": f"{multiplier:.2f}".rstrip("0").rstrip("."), "prefix": "×"},
                 {"label": "建议采购", "value": suggest_qty or math.ceil(gap), "unit": "件"},
             ],

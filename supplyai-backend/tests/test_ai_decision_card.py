@@ -73,3 +73,20 @@ async def test_decision_card_risk_queue_uses_backend_rows() -> None:
     assert card["source"] == "backend"
     assert card["rows"]
     assert card["rows"][0]["listingId"]
+
+
+@pytest.mark.asyncio
+async def test_decision_card_holiday_readiness_uses_sku_tags() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/supplyai/ai/decision-card",
+            json={"tenant_id": 100228, "scenario": "holiday_readiness"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    card = body["card"]
+    assert card["type"] == "holiday_readiness"
+    assert "通过标签关联" in card["summary"]
+    assert card["rows"]
+    assert all("tags" in row and row["tags"] for row in card["rows"])

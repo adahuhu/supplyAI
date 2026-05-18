@@ -44,6 +44,7 @@ class MkListingProductSources(Base):
     image_url: Mapped[str | None] = mapped_column(String(500))
     brand: Mapped[str | None] = mapped_column(String(100))
     category: Mapped[str | None] = mapped_column(String(250))
+    label_ids: Mapped[str | None] = mapped_column(String(255))
     country_code: Mapped[str | None] = mapped_column(String(10))
     country: Mapped[str | None] = mapped_column(String(50))
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))

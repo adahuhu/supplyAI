@@ -626,6 +626,15 @@ function fmtYMDV7(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function holidayBandLabelV7(h) {
+  const nameMap = {
+    'Mothers Day': '母亲节',
+    "Mother's Day": '母亲节',
+  };
+  const name = nameMap[h?.name] || h?.name || '大促';
+  return `${name} x${Number(h?.mult || 1).toFixed(1)}`;
+}
+
 function extendHistoryV7(histRaw, targetDays, seed0) {
   const base = histRaw && histRaw.length ? histRaw : [0];
   const result = [];
@@ -1407,6 +1416,9 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
             const bw = Math.max(0, x2 - x1);
             if (bw < 2) return null;
             const isPoint = h.isPointOverride;
+            const bandLabel = isPoint ? `x${h.mult.toFixed(1)}` : holidayBandLabelV7(h);
+            const labelW = Math.min(132, Math.max(44, bandLabel.length * 6.2 + 10));
+            const labelX = Math.max(PAD.l + 2, Math.min(x1 + 1, PAD.l + cW - labelW - 2));
             return (
               <g key={h.id}>
                 <rect x={x1} y={PAD.t} width={bw} height={cH}
@@ -1422,9 +1434,9 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
                 </>}
                 {bw > 16 && (
                   <g style={{ pointerEvents: 'none' }}>
-                    <rect x={x1 + 1} y={PAD.t - 1} width={Math.min(bw - 2, 118)} height={17} rx="3" fill={h.color} opacity="0.55"/>
-                    <text x={x1 + 5} y={PAD.t + 12} fontSize="9.5" fill="#fff" fontWeight="600">
-                      {bw > 64 ? (isPoint ? `x${h.mult.toFixed(1)}` : `${h.name} x${h.mult.toFixed(1)}`) : `x${h.mult.toFixed(1)}`}
+                    <rect x={labelX} y={PAD.t - 1} width={labelW} height={17} rx="3" fill={h.color} opacity="0.58"/>
+                    <text x={labelX + 5} y={PAD.t + 12} fontSize="9.5" fill="#fff" fontWeight="600">
+                      {bandLabel}
                     </text>
                   </g>
                 )}

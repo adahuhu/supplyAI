@@ -12,6 +12,7 @@ from supplyai.models.mk import (
     MkCalcRun,
     MkListingProductSources,
     MkReplenishmentRule,
+    MkRuleLogisticsMethod,
     MkSkuForecastDaily,
     MkSupplySkuDailyStat,
 )
@@ -103,6 +104,20 @@ class CalcRepository:
             )
         )
         return list(result.scalars().all())
+
+    async def rule_logistics_days(self, rule_ids: list[str]) -> dict[str, tuple[int, ...]]:
+        if not rule_ids:
+            return {}
+        result = await self._session.execute(
+            select(MkRuleLogisticsMethod).where(
+                MkRuleLogisticsMethod.rule_id.in_(rule_ids),
+                MkRuleLogisticsMethod.is_active == 1,
+            )
+        )
+        out: dict[str, list[int]] = defaultdict(list)
+        for row in result.scalars().all():
+            out[row.rule_id].append(int(row.logistics_days or 0))
+        return {rule_id: tuple(days) for rule_id, days in out.items()}
 
     async def insert_calc_run(self, run: MkCalcRun) -> MkCalcRun:
         self._session.add(run)

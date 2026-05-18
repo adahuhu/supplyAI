@@ -1,6 +1,7 @@
 """SKU 应用服务."""
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -67,6 +68,21 @@ def _compute_future_30d_profit(
     )
 
 
+def _parse_label_ids(value: str | None) -> list[str]:
+    """把 ERP/物化表里的标签串拆成前端可展示的标签列表."""
+    if not value:
+        return []
+    tags: list[str] = []
+    seen: set[str] = set()
+    for part in re.split(r"[,，;；|/]+", value):
+        tag = part.strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        tags.append(tag)
+    return tags
+
+
 def _inventory_override_id(
     *, tenant_id: int, listing_id: int, forecast_date: date
 ) -> str:
@@ -89,6 +105,7 @@ def _row_to_dto(
         + (stat.fba_inbound_shipped or 0)
         + (stat.fba_inbound_receiving or 0)
     )
+    label_ids = stat.label_ids or (lps.label_ids if lps else None)
     return SkuSummaryDTO(
         id=stat.listing_id or stat.id,
         calc_run_id=stat.calc_run_id,
@@ -103,6 +120,8 @@ def _row_to_dto(
         image_url=lps.image_url if lps else None,
         brand=lps.brand if lps else None,
         category=lps.category if lps else None,
+        label_ids=label_ids,
+        tags=_parse_label_ids(label_ids),
         owner=lps.owner if lps else None,
         store_name=store_name,
         country_code=stat.country_code,

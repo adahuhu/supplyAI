@@ -101,6 +101,13 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
         setPurchaseDuration(Number(replenish.purchase_duration_days ?? 0));
         setPurchaseDelivery(Number(replenish.delivery_days ?? 0));
         setQcDays(Number(replenish.qc_days ?? 0));
+        if (Array.isArray(replenish.logistics_methods) && replenish.logistics_methods.length) {
+          setLogistics(replenish.logistics_methods.map((m, i) => ({
+            id: `${replenish.rule_id || 'rule'}-${i}`,
+            mode: m.mode || m.logistics_mode || '海运',
+            days: Number(m.days ?? m.logistics_days ?? 0),
+          })));
+        }
       }
 
       const forecast = forecastResp?.rows?.[0];
@@ -207,6 +214,10 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
             purchase_duration_days: purchaseDuration,
             delivery_days: purchaseDelivery,
             qc_days: qcDays,
+            logistics_methods: logistics.map(l => ({
+              mode: l.mode,
+              days: Number(l.days || 0),
+            })),
             enabled: true,
             updated_by: 'frontend',
           });
@@ -269,7 +280,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
 
   return (
     <Modal open={open} onClose={onClose} width={1360}>
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ flex: 'none', padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
         <Icon name="settings" size={16}/>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="h2">规则设置</div>
@@ -290,7 +301,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
       </div>
 
       {/* Scope */}
-      <div style={{ padding: '14px 18px', display: 'flex', gap: 16, borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+      <div style={{ flex: 'none', padding: '14px 18px', display: 'flex', gap: 16, borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
         <div style={{ flex: 1 }}>
           <div className="label" style={{ marginBottom: 6 }}>规则类型</div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -343,7 +354,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 18px' }}>
+      <div style={{ flex: 'none', display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 18px' }}>
         {[
           { v: 'replenish', l: '补货规则' },
           { v: 'forecast', l: '销量预测' },
@@ -359,7 +370,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 600, maxHeight: 'calc(100vh - 220px)' }}>
+      <div style={{ flex: 'none', display: 'flex', height: 'clamp(320px, calc(100vh - 360px), 560px)', minHeight: 0, overflow: 'hidden' }}>
         {tab === 'replenish' ? (
           <ReplenishTab
             safeDays={safeDays} setSafeDays={setSafeDays}
@@ -385,7 +396,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
       </div>
 
       {/* Footer */}
-      <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 'none', padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)' }}>
         <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
           {hydratingRules ? '读取已保存规则…' : computing ? <span><span className="pulse">●</span> 计算中…</span> : (saving ? '保存中…' : '修改后保存将触发重新计算')}
         </span>
