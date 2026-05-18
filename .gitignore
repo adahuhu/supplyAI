@@ -33,6 +33,7 @@ list_fields.xlsx
 
 # IDE / agent caches
 .claude/
+.codex/
 
 # Annotated screenshot attachments (only commit img1-img13)
 doc-imgs/att-*.bin
