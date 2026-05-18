@@ -29,6 +29,7 @@ class MkSkuInboundDetail(Base):
     sku: Mapped[str | None] = mapped_column(String(64))
     inbound_type: Mapped[str] = mapped_column(String(30))  # purchase / transfer / local_receiving / processing
     inbound_status: Mapped[str] = mapped_column(String(30))  # in_transit / receiving / pending
+    logistics_type: Mapped[str | None] = mapped_column(String(30), nullable=True)  # sea / sea_express / sea_air_express / air / truck / express
     qty: Mapped[int] = mapped_column(Integer)
     expected_arrival_date: Mapped[date | None] = mapped_column(Date)
     source_order_no: Mapped[str | None] = mapped_column(String(64))

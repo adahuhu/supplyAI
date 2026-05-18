@@ -34,15 +34,17 @@ class DashScopeClient:
         timeout: float = 60.0,
         verify_ssl: bool = True,
         enable_thinking: bool = False,
+        provider: str = "dashscope",
     ) -> None:
         if not api_key:
-            raise ValueError("DashScope api_key 未配置 (settings.dashscope_api_key)")
+            raise ValueError("API key 未配置 (SUPPLY_DASH_API_KEY)")
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._verify_ssl = verify_ssl
         self._enable_thinking = enable_thinking
+        self._provider = provider
         self._http = http_client  # 测试时可注入
 
     async def chat(
@@ -91,7 +93,7 @@ class DashScopeClient:
             body["stream"] = True
         # Qwen3.x 默认开启 reasoning_content;关掉以消除 30-60s 首字延迟。
         # 通过 extra_body 透传:OpenAI 兼容协议本来没有这个字段,DashScope 自定义接受。
-        if not self._enable_thinking:
+        if self._provider == "dashscope" and not self._enable_thinking:
             body["enable_thinking"] = False
         if tools:
             body["tools"] = [

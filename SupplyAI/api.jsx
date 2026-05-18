@@ -7,7 +7,7 @@
     const fromQuery = params.get('api');
     if (fromQuery) return fromQuery.replace(/\/$/, '');
     if (window.SUPPLYAI_API_BASE) return window.SUPPLYAI_API_BASE.replace(/\/$/, '');
-    return 'http://127.0.0.1:8000/api/supplyai';
+    return 'http://127.0.0.1:8002/api/supplyai';
   }
 
   const TENANT_ID = 100228;

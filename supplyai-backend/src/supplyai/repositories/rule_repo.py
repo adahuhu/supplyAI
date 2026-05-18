@@ -134,7 +134,7 @@ class RuleRepository:
                     logistics_mode=mode,
                     logistics_days=days,
                     is_active=1,
-                    source_type="mock",
+                    source_type="frontend",
                 )
                 for mode, days in methods
             ]

@@ -195,7 +195,7 @@ function HeroSummary({ setRoute }) {
         <button
           className="btn ghost sm"
           style={{ color: 'var(--accent-text)' }}
-          onClick={() => setRoute({ page: 'list', filter: 'p1' })}>
+          onClick={() => setRoute({ page: 'list', filter: 'suggest' })}>
 
           查看高风险队列 →
         </button>

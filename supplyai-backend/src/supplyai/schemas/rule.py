@@ -9,6 +9,15 @@ from pydantic import BaseModel, ConfigDict, Field
 ScopeType = Literal["global", "store", "sku"]
 
 
+class LogisticsMethodDTO(BaseModel):
+    """单条物流方式配置."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
+    logistics_mode: str   # sea / air / sea_express / express / truck / air_express
+    logistics_days: int   # 运输天数
+
+
 class RuleListRequest(BaseModel):
     tenant_id: int
     scope_types: list[ScopeType] | None = None

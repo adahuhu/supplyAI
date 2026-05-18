@@ -1,5 +1,31 @@
 // 备货计划列表页 — full data table with filters, batch ops, column config.
 
+function CopyBtn({ text }) {
+  const [copied, setCopied] = React.useState(false);
+  if (!text) return null;
+  const handleClick = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  };
+  return (
+    <button
+      onClick={handleClick}
+      title={'复制 ' + text}
+      style={{
+        appearance: 'none', border: 'none', background: 'none', padding: '1px 3px',
+        cursor: 'pointer', color: copied ? 'var(--p3-strong)' : 'var(--text-4)',
+        fontSize: 10, lineHeight: 1, borderRadius: 3, flexShrink: 0,
+      }}
+      className={'copy-btn' + (copied ? ' copied' : '')}
+    >
+      {copied ? '✓' : '⎘'}
+    </button>
+  );
+}
+
 const LIST_SORT_ACCESSORS = {
   product: s => s.name || '',
   sku: s => s.sku || '',
@@ -440,15 +466,21 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                       <ProductImage label={s.msku.slice(-3)} size={36} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5 }}>{s.name}</div>
-                        <div style={{ fontSize: 10.5, color: 'var(--text-3)', display: 'flex', gap: 6 }} className="mono">
-                          <span>{s.msku}</span>·<span>{s.asin}</span>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }} className="mono">
+                          <span>{s.msku}</span><CopyBtn text={s.msku}/>
+                          <span style={{ color: 'var(--text-5)' }}>·</span>
+                          <span>{s.asin}</span><CopyBtn text={s.asin}/>
                         </div>
                       </div>
                     </div>
                   </td>
                   <td className="mono" style={{ fontSize: 11.5 }}>
-                    <div style={{ color: 'var(--text-2)', fontWeight: 500 }}>{s.sku || '—'}</div>
-                    <div style={{ color: 'var(--text-4)', marginTop: 2 }}>FNSKU {s.fnsku || '—'}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--text-2)', fontWeight: 500 }}>
+                      <span>{s.sku || '—'}</span><CopyBtn text={s.sku}/>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--text-4)', marginTop: 2, fontSize: 10.5 }}>
+                      <span>FNSKU {s.fnsku || '—'}</span><CopyBtn text={s.fnsku}/>
+                    </div>
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', minWidth: 120, maxWidth: 180 }}>
@@ -821,22 +853,39 @@ function FBAInboundCell({ sku }) {
                   <thead>
                     <tr style={{ background: 'var(--surface-2)' }}>
                       <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 500, color: 'var(--text-3)' }}>货件 / 发货单</th>
-                      <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 500, color: 'var(--text-3)' }}>方式</th>
+                      <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 500, color: 'var(--text-3)' }}>来源</th>
+                      <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 500, color: 'var(--text-3)' }}>物流方式</th>
                       <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 500, color: 'var(--text-3)' }}>数量</th>
                       <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 500, color: 'var(--text-3)' }}>预计到货</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {details.map((d, i) => (
+                    {details.map((d, i) => {
+                      const sourceLabel = INBOUND_TYPE_LABEL[d.inbound_type] || d.inbound_type || '—';
+                      const logisticsLabel = d.logistics_type
+                        ? (LOGISTICS_TYPE_LABEL[d.logistics_type] || d.logistics_type)
+                        : null;
+                      return (
                       <tr key={d.inbound_id || i} style={{ borderTop: '1px solid var(--border)' }}>
                         <td style={{ padding: '6px 6px' }}>
                           <div className="mono" style={{ fontSize: 11, fontWeight: 500 }}>{d.inbound_id}</div>
-                          {d.source_order_no && (
+                          {d.source_order_no && d.source_order_no !== d.inbound_id && (
                             <div className="mono" style={{ fontSize: 10, color: 'var(--text-4)' }}>{d.source_order_no}</div>
                           )}
                         </td>
-                        <td style={{ padding: '6px 6px', color: 'var(--text-2)' }}>
-                          {INBOUND_TYPE_LABEL[d.inbound_type] || d.inbound_type}
+                        <td style={{ padding: '6px 6px', fontSize: 11, color: 'var(--text-3)' }}>
+                          {sourceLabel}
+                        </td>
+                        <td style={{ padding: '6px 6px' }}>
+                          {logisticsLabel ? (
+                            <span style={{
+                              fontSize: 11, padding: '1px 6px', borderRadius: 3,
+                              background: 'var(--accent-soft)', color: 'var(--accent-text)',
+                              fontWeight: 500,
+                            }}>{logisticsLabel}</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-4)', fontSize: 11 }}>—</span>
+                          )}
                         </td>
                         <td className="tabular" style={{ padding: '6px 6px', textAlign: 'right', fontWeight: 500 }}>
                           {d.qty}
@@ -845,7 +894,8 @@ function FBAInboundCell({ sku }) {
                           {d.expected_arrival_date ? fmt.dateLong(new Date(d.expected_arrival_date)) : '—'}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -861,10 +911,21 @@ const INBOUND_TYPE_LABEL = {
   fba_working: 'FBA 计划入库',
   fba_shipped: 'FBA 已发货',
   fba_receiving: 'FBA 入库中',
-  purchase: '空派',
-  transfer: '海派',
+  purchase: '本地采购',
+  transfer: '调拨',
   local_receiving: '本地收货',
   processing: '加工中',
+};
+
+const LOGISTICS_TYPE_LABEL = {
+  sea: '海派',
+  sea_express: '快船',
+  sea_air_express: '空派',
+  air: '空运',
+  air_express: '空派快递',
+  truck: '陆运',
+  express: '快递',
+  fba_direct: 'FBA 直发',
 };
 
 function SalesTrendCell({ data }) {

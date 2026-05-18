@@ -663,7 +663,23 @@ function buildForecastV7(baseFutureDaily, futDays, holidays) {
   return result;
 }
 
-function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, startInv, invOverrides) {
+// 将 inboundList 转为 absDay(今天起第N天) → qty 的映射
+function buildInboundByDayV7(inboundList) {
+  const map = {};
+  if (!inboundList || !inboundList.length) return map;
+  for (const b of inboundList) {
+    if (!b.expected_arrival_date || !(b.qty > 0)) continue;
+    const s = String(b.expected_arrival_date);
+    const d = new Date(s.includes('T') ? s : s + 'T00:00:00');
+    if (isNaN(d.getTime())) continue;
+    const absDay = dateDiffV7(TODAY_V7, d);
+    if (absDay < 1) continue; // 已到货，计入当前库存
+    map[absDay] = (map[absDay] || 0) + b.qty;
+  }
+  return map;
+}
+
+function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, startInv, invOverrides, inboundByDay = {}) {
   const demand = buildForecastV7(baseFutureDaily, futDays, holidays);
   const result = [];
   let inv = Math.max(0, Number(startInv) || 0);
@@ -672,6 +688,7 @@ function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, sta
     if (invOverrides[absDay] !== undefined) {
       inv = Math.max(0, Number(invOverrides[absDay]) || 0);
     }
+    if (inboundByDay[absDay]) inv += inboundByDay[absDay];
     const wanted = demand[i]?.value || 0;
     const sold = inv <= 0 ? 0 : Math.min(wanted, inv);
     inv = Math.max(0, inv - sold);
@@ -680,12 +697,13 @@ function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, sta
   return result;
 }
 
-function buildInventoryV7(startInv, forecastValues, invOverrides) {
+function buildInventoryV7(startInv, forecastValues, invOverrides, inboundByDay = {}) {
   const series = [];
   let inv = startInv;
   for (let i = 0; i < forecastValues.length; i++) {
     const absDay = i + 1;
     if (invOverrides[absDay] !== undefined) inv = invOverrides[absDay];
+    if (inboundByDay[absDay]) inv += inboundByDay[absDay];
     inv = Math.max(0, inv - forecastValues[i]);
     series.push(inv);
   }
@@ -704,9 +722,13 @@ function TrendPanelV7({ sku }) {
   const [invSaveState, setInvSaveState] = React.useState(null);
   const range = TIME_RANGES_V7.find(r => r.id === rangeId) || TIME_RANGES_V7[1];
   const isLastYear = rangeId === 'lastYear';
+  const inboundByDay = React.useMemo(
+    () => buildInboundByDayV7(sku.inboundList),
+    [sku.id, JSON.stringify(sku.inboundList)]
+  );
   const forecast = React.useMemo(
-    () => buildStockConstrainedForecastV7(sku.futureDaily, range.futDays, holidays, sku.totalStock, invOverrides),
-    [sku.futureDaily, sku.totalStock, range.futDays, JSON.stringify(holidays), JSON.stringify(invOverrides)]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, range.futDays, holidays, sku.totalStock, invOverrides, inboundByDay),
+    [sku.futureDaily, sku.totalStock, range.futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(inboundByDay)]
   );
   const adjAvg = range.futDays > 0
     ? Math.round(forecast.reduce((sum, item) => sum + item.value, 0) / Math.max(1, forecast.length))
@@ -891,6 +913,7 @@ function TrendPanelV7({ sku }) {
         onHolidayChange={updateHoliday}
         invOverrides={invOverrides}
         onInvOverride={handleInvOverride}
+        inboundByDay={inboundByDay}
       />
 
       <div style={{ display: 'flex', gap: 14, padding: '6px 0 8px', fontSize: 11, color: 'var(--text-3)', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1207,7 +1230,7 @@ function HolidayManagerModal({ holidays, onClose, onSave, onDelete }) {
   );
 }
 
-function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onInvOverride }) {
+function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onInvOverride, inboundByDay = {} }) {
   const svgRef = React.useRef(null);
   const [drag, setDrag] = React.useState(null);
   const [tip, setTip] = React.useState(null);
@@ -1222,13 +1245,13 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
     return extendHistoryV7(raw, histDays, sku.id.charCodeAt(0));
   }, [sku.id, histDays]);
   const forecast = React.useMemo(
-    () => buildStockConstrainedForecastV7(sku.futureDaily, futDays, holidays, sku.totalStock, invOverrides),
-    [sku.futureDaily, sku.totalStock, futDays, JSON.stringify(holidays), JSON.stringify(invOverrides)]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, futDays, holidays, sku.totalStock, invOverrides, inboundByDay),
+    [sku.futureDaily, sku.totalStock, futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(inboundByDay)]
   );
   const futVals = forecast.map(f => f.value);
   const invSeries = React.useMemo(
-    () => buildInventoryV7(sku.totalStock, futVals, invOverrides),
-    [sku.totalStock, JSON.stringify(futVals), JSON.stringify(invOverrides)]
+    () => buildInventoryV7(sku.totalStock, futVals, invOverrides, inboundByDay),
+    [sku.totalStock, JSON.stringify(futVals), JSON.stringify(invOverrides), JSON.stringify(inboundByDay)]
   );
   const W = 960;
   const H = 310;
@@ -1483,6 +1506,20 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
                 <g key={abs}>
                   <circle cx={ix} cy={iy} r="5" fill="var(--accent)" stroke="var(--surface)" strokeWidth="2"/>
                   <text x={ix} y={iy - 8} fontSize="9" fill="var(--accent-text)" textAnchor="middle" fontWeight="600">+{fmt.num(qty)}</text>
+                </g>
+              );
+            })}
+            {Object.entries(inboundByDay).map(([abs, qty]) => {
+              const ai = parseInt(abs, 10);
+              if (ai < 1 || ai > futDays) return null;
+              const ix = toX(histLen - 1 + ai - 1);
+              const invAfter = invSeries[ai - 1] ?? 0;
+              const iy = toIY(invAfter);
+              return (
+                <g key={`inb-${abs}`}>
+                  <line x1={ix} y1={PAD.t} x2={ix} y2={PAD.t + cH} stroke="var(--p3-strong)" strokeWidth="1.2" strokeDasharray="3 3" opacity="0.7"/>
+                  <circle cx={ix} cy={iy} r="5" fill="var(--p3-strong)" stroke="var(--surface)" strokeWidth="2"/>
+                  <text x={ix + 6} y={iy - 7} fontSize="9" fill="var(--p3-strong)" fontWeight="700">+{fmt.num(qty)}</text>
                 </g>
               );
             })}
@@ -1959,13 +1996,27 @@ function DetailStat({ label, main, sub, hint, last }) {
   );
 }
 
-const LOGISTICS_LABEL = {
+// 入库来源类型（inbound_type 字段）
+const INBOUND_TYPE_LABEL = {
   fba_working: 'FBA 计划入库',
   fba_shipped: 'FBA 已发货',
   fba_receiving: 'FBA 入库中',
-  sea: '海派', sea_express: '快船', sea_air_express: '空派',
-  purchase: '采购', transfer: '调拨', processing: '加工', local_receiving: '本地入库',
+  purchase: '本地采购',
+  transfer: '调拨',
+  processing: '加工',
+  local_receiving: '本地入库',
+};
+
+// 物流方式（logistics_type 字段）
+const LOGISTICS_TYPE_LABEL = {
+  sea: '海派',
+  sea_express: '快船',
+  sea_air_express: '空派',
   air: '空运',
+  air_express: '空派快递',
+  truck: '陆运',
+  express: '快递',
+  fba_direct: 'FBA 直发',
 };
 
 const INBOUND_STATUS_LABEL = {
@@ -1975,65 +2026,114 @@ const INBOUND_STATUS_LABEL = {
 function InvItem({ color, label, value, note, expandable, inboundList }) {
   const [open, setOpen] = React.useState(false);
   const hasList = expandable && inboundList && inboundList.length > 0;
-  const ref = React.useRef(null);
-  React.useEffect(() => {
-    if (!open) return;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
+  const totalQty = hasList ? inboundList.reduce((s, b) => s + (b.qty || 0), 0) : 0;
 
   return (
-    <div ref={ref} style={{ display: 'flex', flexDirection: 'column', gap: 4, position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-3)' }}>
         <span style={{ width: 8, height: 8, borderRadius: 2, background: color }}/>
         {label}
         {hasList && (
           <span
-            onClick={() => setOpen(v => !v)}
+            onClick={() => setOpen(true)}
             style={{
               marginLeft: 'auto', cursor: 'pointer',
               fontSize: 10.5, color: 'var(--accent-text)',
               padding: '1px 5px', borderRadius: 4,
-              background: open ? 'var(--accent-soft)' : 'transparent',
+              background: 'var(--accent-soft)',
             }}>
-            {inboundList.length} 笔 {open ? '收起 ▴' : '展开 ▾'}
+            {inboundList.length} 笔明细 ▾
           </span>
         )}
       </div>
       <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>{fmt.num(value)}</div>
       <div style={{ fontSize: 11, color: 'var(--text-4)' }}>{note}</div>
+
       {hasList && open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-          minWidth: 280, zIndex: 50,
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 'var(--r-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
-          padding: 8, fontSize: 11.5,
-        }}>
-          <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginBottom: 6, padding: '0 4px' }}>
-            货件 / 物流方式 / 预计到货
-          </div>
-          {inboundList.map(b => {
-            const mode = LOGISTICS_LABEL[b.inbound_type] || b.inbound_type || '—';
-            const status = INBOUND_STATUS_LABEL[b.inbound_status] || b.inbound_status || '';
-            const eta = b.expected_arrival_date
-              ? new Date(b.expected_arrival_date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-              : '—';
-            return (
-              <div key={b.inbound_id} style={{
-                display: 'grid', gridTemplateColumns: '90px 1fr auto auto',
-                gap: 8, padding: '6px 4px', alignItems: 'center',
-                borderBottom: '1px solid var(--border-subtle, rgba(255,255,255,0.04))',
-              }}>
-                <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.source_order_no || b.inbound_id}</span>
-                <span style={{ color: 'var(--text-2)' }}>{mode}{status ? ` · ${status}` : ''}</span>
-                <span className="tabular" style={{ color: 'var(--text-2)' }}>{fmt.num(b.qty)} 件</span>
-                <span style={{ fontSize: 11, color: 'var(--accent-text)' }}>{eta}</span>
+        <Modal open={true} onClose={() => setOpen(false)} width={560}>
+          <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div className="h3">FBA 在途明细</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 3 }}>
+                共 {inboundList.length} 笔货件 · 合计 {fmt.num(totalQty)} 件
               </div>
-            );
-          })}
-        </div>
+            </div>
+            <button className="btn ghost icon sm" onClick={() => setOpen(false)}><Icon name="x" size={14}/></button>
+          </div>
+          <div style={{ padding: '8px 0', maxHeight: 480, overflow: 'auto' }}>
+            <table className="t" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th style={{ paddingLeft: 18 }}>货件号</th>
+                  <th>来源类型</th>
+                  <th>物流方式</th>
+                  <th>状态</th>
+                  <th className="num">数量</th>
+                  <th className="num" style={{ paddingRight: 18 }}>预计到货</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inboundList.map(b => {
+                  const sourceLabel = INBOUND_TYPE_LABEL[b.inbound_type] || b.inbound_type || '—';
+                  const logisticsLabel = b.logistics_type
+                    ? (LOGISTICS_TYPE_LABEL[b.logistics_type] || b.logistics_type)
+                    : null;
+                  const status = INBOUND_STATUS_LABEL[b.inbound_status] || b.inbound_status || '—';
+                  const etaDate = b.expected_arrival_date
+                    ? new Date(String(b.expected_arrival_date).includes('T') ? b.expected_arrival_date : b.expected_arrival_date + 'T00:00:00')
+                    : null;
+                  const eta = etaDate && !isNaN(etaDate.getTime())
+                    ? etaDate.toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' })
+                    : '—';
+                  const daysLeft = etaDate && !isNaN(etaDate.getTime())
+                    ? Math.ceil((etaDate - TODAY_V7) / 86400000)
+                    : null;
+                  return (
+                    <tr key={b.inbound_id}>
+                      <td style={{ paddingLeft: 18 }}>
+                        <span className="mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                          {b.source_order_no || b.inbound_id || '—'}
+                        </span>
+                      </td>
+                      <td style={{ color: 'var(--text-2)' }}>{sourceLabel}</td>
+                      <td>
+                        {logisticsLabel ? (
+                          <span style={{
+                            fontSize: 11, padding: '2px 7px', borderRadius: 4,
+                            background: 'var(--accent-soft)', color: 'var(--accent-text)',
+                          }}>{logisticsLabel}</span>
+                        ) : (
+                          <span style={{ color: 'var(--text-4)', fontSize: 11 }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        <span style={{
+                          fontSize: 11, padding: '2px 7px', borderRadius: 4,
+                          background: b.inbound_status === 'receiving' ? 'var(--p3-soft)' : 'var(--surface-2)',
+                          color: b.inbound_status === 'receiving' ? 'var(--p3-strong)' : 'var(--text-3)',
+                        }}>{status}</span>
+                      </td>
+                      <td className="num tabular" style={{ fontWeight: 600 }}>{fmt.num(b.qty)} 件</td>
+                      <td className="num" style={{ paddingRight: 18 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{eta}</span>
+                          {daysLeft !== null && (
+                            <span style={{ fontSize: 10.5, color: daysLeft <= 3 ? 'var(--p3-strong)' : 'var(--text-4)' }}>
+                              {daysLeft <= 0 ? '今天到' : `还有 ${daysLeft} 天`}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ padding: '10px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="btn sm primary" onClick={() => setOpen(false)}>关闭</button>
+          </div>
+        </Modal>
       )}
     </div>
   );

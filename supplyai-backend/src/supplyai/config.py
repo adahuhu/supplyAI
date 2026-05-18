@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/supplyai.db"
 
     # ===== AI 服务 =====
-    ai_provider: Literal["dashscope"] = "dashscope"
+    ai_provider: Literal["dashscope", "openai"] = "dashscope"
     ai_model: str = "qwen3.6-plus"
     ai_max_input_tokens: int = 4000
     ai_max_output_tokens: int = 1024

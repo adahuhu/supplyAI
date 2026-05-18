@@ -1,7 +1,4 @@
-"""AI 客户端工厂 — 当前仅 DashScope (Qwen3.6-plus, OpenAI 兼容).
-
-未配置 API key 时直接抛错,不再降级到任何 mock。
-"""
+"""AI 客户端工厂 — 支持 dashscope / openai 兼容接口."""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -10,6 +7,8 @@ from supplyai.config import settings
 from supplyai.domain.ai.client import AiClient
 from supplyai.domain.ai.dashscope_client import DashScopeClient
 
+_SUPPORTED_PROVIDERS = {"dashscope", "openai"}
+
 
 class AiClientNotConfigured(RuntimeError):
     """AI 客户端配置缺失;不允许任何降级到 mock 的兜底."""
@@ -17,20 +16,23 @@ class AiClientNotConfigured(RuntimeError):
 
 @lru_cache(maxsize=1)
 def get_ai_client() -> AiClient:
-    if settings.ai_provider != "dashscope":
+    provider = (settings.ai_provider or "dashscope").lower()
+    if provider not in _SUPPORTED_PROVIDERS:
         raise AiClientNotConfigured(
-            f"不支持的 AI provider: {settings.ai_provider!r}。当前仅支持 dashscope。"
+            f"不支持的 AI provider: {provider!r}。支持: {sorted(_SUPPORTED_PROVIDERS)}"
         )
     if not settings.dashscope_api_key:
         raise AiClientNotConfigured(
-            "AI provider=dashscope 但未配置 SUPPLY_DASH_API_KEY (或 DASHSCOPE_API_KEY)。"
+            f"AI provider={provider!r} 但未配置 SUPPLY_DASH_API_KEY。"
         )
+    enable_thinking = settings.dashscope_enable_thinking if provider == "dashscope" else False
     return DashScopeClient(
         api_key=settings.dashscope_api_key,
         model=settings.ai_model,
         base_url=settings.dashscope_base_url,
         verify_ssl=settings.dashscope_verify_ssl,
-        enable_thinking=settings.dashscope_enable_thinking,
+        enable_thinking=enable_thinking,
+        provider=provider,
     )
 
 

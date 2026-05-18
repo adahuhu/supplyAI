@@ -74,8 +74,8 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
   const [qcDays, setQcDays] = React.useState(3);
   const [stockScope, setStockScope] = React.useState([...DEFAULT_STOCK_SCOPE]);
   const [logistics, setLogistics] = React.useState([
-    { id: 1, mode: '海运', days: 35 },
-    { id: 2, mode: '空运', days: 8 },
+    { id: 1, mode: 'sea', days: 35 },
+    { id: 2, mode: 'air', days: 8 },
   ]);
 
   // Forecast rule state
@@ -130,7 +130,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
         if (Array.isArray(replenish.logistics_methods) && replenish.logistics_methods.length) {
           setLogistics(replenish.logistics_methods.map((m, i) => ({
             id: `${replenish.rule_id || 'rule'}-${i}`,
-            mode: m.mode || m.logistics_mode || '海运',
+            mode: m.mode || m.logistics_mode || 'sea',
             days: Number(m.days ?? m.logistics_days ?? 0),
           })));
         }
@@ -498,7 +498,7 @@ function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDura
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <div className="label">物流方式</div>
-          <button className="btn sm" onClick={() => setLogistics([...logistics, { id: Date.now(), mode: '快船', days: 18 }])}>
+          <button className="btn sm" onClick={() => setLogistics([...logistics, { id: Date.now(), mode: 'sea_express', days: 18 }])}>
             <Icon name="plus" size={11}/>新增
           </button>
         </div>
@@ -506,12 +506,21 @@ function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDura
           {logistics.map((l, i) => (
             <div key={l.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <select className="sel" value={l.mode} onChange={e => {
-                const next = [...logistics]; next[i].mode = e.target.value; setLogistics(next);
+                const next = [...logistics]; next[i] = { ...next[i], mode: e.target.value }; setLogistics(next);
               }} style={{ flex: 1 }}>
-                {['海运', '空运', '快船', '快递'].filter(m => m === l.mode || !logistics.some(x => x.mode === m)).map(m => <option key={m} value={m}>{m}</option>)}
+                {[
+                  { code: 'sea', label: '海运' },
+                  { code: 'sea_express', label: '快船' },
+                  { code: 'air', label: '空运' },
+                  { code: 'express', label: '快递' },
+                  { code: 'truck', label: '陆运' },
+                  { code: 'air_express', label: '空派' },
+                ].filter(o => o.code === l.mode || !logistics.some(x => x.mode === o.code)).map(o => (
+                  <option key={o.code} value={o.code}>{o.label}</option>
+                ))}
               </select>
               <input className="txt" type="number" value={l.days}
-                onChange={e => { const next = [...logistics]; next[i].days = +e.target.value; setLogistics(next); }}
+                onChange={e => { const next = [...logistics]; next[i] = { ...next[i], days: +e.target.value }; setLogistics(next); }}
                 style={{ width: 100 }}/>
               <span style={{ fontSize: 12, color: 'var(--text-3)' }}>天</span>
               <button className="btn ghost icon sm" onClick={() => setLogistics(logistics.filter(x => x.id !== l.id))} disabled={logistics.length === 1}>

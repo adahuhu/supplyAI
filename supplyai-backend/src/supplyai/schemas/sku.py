@@ -143,6 +143,7 @@ class InboundDetailDTO(BaseModel):
     inbound_id: str
     inbound_type: str
     inbound_status: str
+    logistics_type: str | None = None  # sea / sea_express / sea_air_express / air / truck / express
     qty: int
     expected_arrival_date: date | None
     source_order_no: str | None = None

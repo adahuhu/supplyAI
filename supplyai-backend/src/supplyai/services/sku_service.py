@@ -476,6 +476,7 @@ def _fba_inbound_breakdown(stat: MkSupplySkuDailyStat) -> list[InboundDetailDTO]
                 inbound_id=f"{order_no}-{stat.listing_id or stat.id}",
                 inbound_type=inbound_type,
                 inbound_status=status,
+                logistics_type=None,  # FBA 平台侧暂无独立物流方式字段
                 qty=qty,
                 expected_arrival_date=stat.stockout_date,
                 source_order_no=order_no,
