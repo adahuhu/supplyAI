@@ -9,6 +9,7 @@ from sqlalchemy import desc, func, select
 
 from supplyai.models.mk import MkForecastRule, MkReplenishmentRule
 from supplyai.repositories.rule_repo import RuleRepository
+from supplyai.domain.calc.rules import DEFAULT_STOCK_SCOPE, normalize_stock_scope
 from supplyai.schemas.rule import (
     ForecastRuleDTO,
     ForecastRuleListRequest,
@@ -52,6 +53,9 @@ def _to_rule_dto(
         purchase_duration_days=rule.purchase_duration_days,
         delivery_days=rule.delivery_days,
         qc_days=rule.qc_days,
+        stock_scope=list(
+            normalize_stock_scope(rule.stock_scope_json or DEFAULT_STOCK_SCOPE)
+        ),
         rule_version=rule.rule_version,
         enabled=bool(rule.enabled),
         updated_by=rule.updated_by,
@@ -141,6 +145,8 @@ class RuleService:
         rule.purchase_duration_days = req.purchase_duration_days
         rule.delivery_days = req.delivery_days
         rule.qc_days = req.qc_days
+        if req.stock_scope is not None or not rule.stock_scope_json:
+            rule.stock_scope_json = list(normalize_stock_scope(req.stock_scope))
         rule.rule_version = req.rule_version
         rule.enabled = 1 if req.enabled else 0
         rule.updated_by = req.updated_by

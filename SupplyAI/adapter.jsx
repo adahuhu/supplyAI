@@ -40,6 +40,17 @@
       .filter(Boolean);
   }
 
+  function stockScopeLabel(scope) {
+    const labels = {
+      fba_available: 'FBA 可用',
+      fba_inbound: '在途',
+      local_actual: '本地实际',
+      local_plan: '本地预计',
+    };
+    const values = Array.isArray(scope) && scope.length ? scope : ['fba_available'];
+    return values.map(key => labels[key] || key).join(' + ');
+  }
+
   function isRecentStockout7(row) {
     const fba7 = normalizeNumberList(
       row.fba_available_7d || row.fba_available_recent_7d || row.fba_available_history_7d
@@ -62,6 +73,9 @@
     const tags = (Array.isArray(row.tags) && row.tags.length)
       ? parseLabelIds(row.tags)
       : parseLabelIds(row.label_ids);
+    const stockScope = Array.isArray(row.stock_scope) && row.stock_scope.length
+      ? row.stock_scope
+      : ['fba_available'];
     return {
       // 标识 — id 用 String(listing_id) 保持路由兼容
       id: String(row.id),
@@ -99,6 +113,9 @@
       stockoutRecent7,
       localTotal: localActual + localPlan,
       totalStock: row.total_stock ?? 0,
+      planningStock: row.planning_stock ?? row.fba_available ?? 0,
+      stockScope,
+      stockScopeLabel: stockScopeLabel(stockScope),
       sellable: row.sellable_days != null ? +(+row.sellable_days).toFixed(2) : 0,
       fbaSellable: row.fba_sellable_days != null ? +(+row.fba_sellable_days).toFixed(2) : 0,
       localSellable: row.local_sellable_days != null ? +(+row.local_sellable_days).toFixed(2) : 0,

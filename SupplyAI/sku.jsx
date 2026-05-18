@@ -695,6 +695,7 @@ function buildInventoryV7(startInv, forecastValues, invOverrides) {
 function TrendPanelV7({ sku }) {
   const [rangeId, setRangeId] = React.useState('30d');
   const [holidays, setHolidays] = React.useState(() => getHolidays());
+  const [holidayModalOpen, setHolidayModalOpen] = React.useState(false);
   const initialInvOverrides = React.useMemo(
     () => ({ ...(sku.inventoryOverrides || {}) }),
     [sku.id, sku.listingId, JSON.stringify(sku.inventoryOverrides || {})]
@@ -718,6 +719,12 @@ function TrendPanelV7({ sku }) {
   React.useEffect(() => {
     setInvOverrides(initialInvOverrides);
   }, [initialInvOverrides]);
+
+  React.useEffect(() => {
+    const openManager = () => setHolidayModalOpen(true);
+    window.addEventListener('supplyai:open-holiday-manager', openManager);
+    return () => window.removeEventListener('supplyai:open-holiday-manager', openManager);
+  }, []);
 
   const syncHolidayList = React.useCallback((next) => {
     const normalized = normalizeHolidayListV7(next);
@@ -954,6 +961,15 @@ function TrendPanelV7({ sku }) {
         <KV k="未来平均日销" v={hasAdj && !isLastYear ? `${(+adjAvg).toFixed(2)} (调后)` : (+sku.futureDaily).toFixed(2)}/>
         <KV k="未来 14 天合计" v={fmt.num(forecast.slice(0, 14).reduce((sum, item) => sum + item.value, 0))}/>
       </div>
+
+      {holidayModalOpen && (
+        <HolidayManagerModal
+          holidays={holidays}
+          onClose={() => setHolidayModalOpen(false)}
+          onSave={saveHoliday}
+          onDelete={deleteHoliday}
+        />
+      )}
     </div>
   );
 }
@@ -1754,7 +1770,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
           }}>
             <RiskCellWithExplain sku={sku}/>
             <DetailStat label="预计断货时间" main={fmt.dateLong(sku.stockoutDate)} sub={fmt.rel(sku.stockoutDate) + ' · 仅 FBA 侧'}/>
-            <DetailStat label="建议采购量" main={fmt.num(sku.suggestQty) + ' 件'} sub={`覆盖周期需求 ${sku.coverageDemand} − 总库存 ${sku.totalStock}`}/>
+            <DetailStat label="建议采购量" main={fmt.num(sku.suggestQty) + ' 件'} sub={`覆盖周期需求 ${sku.coverageDemand} − 参与库存 ${sku.planningStock ?? sku.fbaAvail}`}/>
             <DetailStat label="建议采购时间" main={fmt.dateLong(sku.purchaseDate)} sub={(() => {
               const r = fmt.rel(sku.purchaseDate);
               const isPast = r.endsWith('天前') || r === '昨天';
@@ -1769,7 +1785,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
               <KV k="FBA 库存" v={fmt.num(sku.fbaAvail + sku.fbaInTransit)} hint="FBA 可用 + 在途"/>
               <KV k="本地库存" v={fmt.num(sku.localTotal)} hint="本地实际 + 本地预计"/>
               <KV k="未来平均日销" v={(+sku.futureDaily).toFixed(2)}/>
-              <KV k="可售天数" v={(+sku.sellable).toFixed(2) + ' 天'} hint="总库存 ÷ 未来平均日销"/>
+              <KV k="可售天数" v={(+sku.sellable).toFixed(2) + ' 天'} hint={(sku.stockScopeLabel || 'FBA 可用') + ' ÷ 未来平均日销'}/>
               <KV k="采购时效" v={sku.purchaseLeadTime + ' 天'}/>
               <KV k="安全天数" v={sku.safeDays + ' 天'}/>
             </div>
@@ -1777,7 +1793,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
               <KV
                 k="上次发货"
                 v={sku.lastShipmentAt ? fmt.dateLong(sku.lastShipmentAt) : '—'}
-                hint={sku.lastShipmentAt ? fmt.rel(sku.lastShipmentAt) + ' · rl_fba_shipment_item' : '暂无 FBA 发货记录'}/>
+                hint={sku.lastShipmentAt ? fmt.rel(sku.lastShipmentAt) + ' · 来自 FBA 发货记录' : '暂无 FBA 发货记录'}/>
               <KV
                 k="上次采购"
                 v={sku.lastPurchaseAt ? fmt.dateLong(sku.lastPurchaseAt) : '—'}
@@ -1795,6 +1811,14 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
           <Panel
             title="销量 & 库存趋势"
             sub="节日色带自动显示 · 点击蓝线改系数 · 点击绿线改库存 · 拖动边缘调范围"
+            right={
+              <button
+                className="btn sm"
+                onClick={() => window.dispatchEvent(new Event('supplyai:open-holiday-manager'))}
+              >
+                <Icon name="tag" size={12}/>节日管理
+              </button>
+            }
           >
             <TrendPanelV7 sku={sku}/>
           </Panel>
@@ -1912,7 +1936,8 @@ function RiskCellWithExplain({ sku }) {
           <CalcRow k="覆盖周期" v={`${sku.purchaseLeadTime}d + ${sku.safeDays}d = ${sku.totalCoverage}d`}/>
           <CalcRow k="覆盖需求" v={`${sku.totalCoverage}d × ${(+sku.futureDaily).toFixed(2)} = ${(+sku.coverageDemand).toFixed(2)} 件`}/>
           <CalcRow k="总库存" v={`${sku.totalStock} = FBA ${sku.fbaAvail + sku.fbaInTransit} + 本地 ${sku.localTotal}`}/>
-          <CalcRow k="建议采购" v={`${sku.coverageDemand} − ${sku.totalStock} = ${fmt.num(sku.suggestQty)} 件`} highlight/>
+          <CalcRow k="参与库存" v={`${sku.planningStock ?? sku.fbaAvail} = ${sku.stockScopeLabel || 'FBA 可用'}`}/>
+          <CalcRow k="建议采购" v={`${sku.coverageDemand} − ${sku.planningStock ?? sku.fbaAvail} = ${fmt.num(sku.suggestQty)} 件`} highlight/>
           <CalcRow k="风险判定" v={`FBA 可售 ${(+sku.fbaSellable).toFixed(2)}d → ${sku.priority.toUpperCase()}（仅 FBA 侧）`}/>
           <CalcRow k="预计断货" v={`今天 + ${(+sku.fbaSellable).toFixed(2)}d = ${fmt.dateLong(sku.stockoutDate)}`}/>
           <CalcRow k="建议采购日" v={`断货 − ${sku.purchaseLeadTime}d = ${fmt.dateLong(sku.purchaseDate)}`} last/>

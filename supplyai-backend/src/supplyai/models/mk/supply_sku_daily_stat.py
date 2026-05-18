@@ -3,7 +3,8 @@
 列表 / Dashboard 优先读这张表,不实时聚合明细。
 关键公式:
   total_stock = fba_available + working + shipped + receiving + local_actual + local_plan
-  suggest_qty = CEIL(max(0, coverage_demand - total_stock))
+  planning_stock = 按补货规则配置选中的参与库存
+  suggest_qty = CEIL(max(0, coverage_demand - planning_stock))
   fba_sellable_days = (fba_available + working + shipped + receiving) / forecast_daily
 """
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, Index, Integer, Numeric, String
+from sqlalchemy import BigInteger, Date, DateTime, Index, Integer, JSON, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from supplyai.models.base import Base, BigIntPk
@@ -88,6 +89,8 @@ class MkSupplySkuDailyStat(Base):
 
     # 总库存与可售天数
     total_stock: Mapped[int | None] = mapped_column(Integer)
+    planning_stock: Mapped[int | None] = mapped_column(Integer)
+    stock_scope_json: Mapped[list | None] = mapped_column(JSON)
     sellable_days: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     fba_sellable_days: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     local_sellable_days: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))

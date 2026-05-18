@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from supplyai.domain.ai.client import AiClient, ChatMessage
-from supplyai.domain.ai.foundation import SYSTEM_PROMPT
+from supplyai.domain.ai.foundation import SYSTEM_PROMPT, sanitize_user_ai_text
 from supplyai.domain.ai.tools import build_tools, execute_tool
 
 logger = logging.getLogger(__name__)
@@ -76,20 +76,20 @@ class AiOrchestrator:
             if sku.get("store_name"):
                 sku_summary.append(f"店铺={sku['store_name']}")
             if sku.get("mall_id"):
-                sku_summary.append(f"mall_id={sku['mall_id']}")
+                sku_summary.append(f"店铺编号={sku['mall_id']}")
             if sku.get("country_code"):
                 sku_summary.append(f"国家={sku['country_code']}")
             if sku.get("priority"):
                 sku_summary.append(f"风险={sku['priority']}")
             if sku.get("listing_id"):
-                sku_summary.append(f"listing_id={sku['listing_id']}")
+                sku_summary.append(f"商品编号={sku['listing_id']}")
             if sku_summary:
                 parts.append("用户当前查看 SKU: " + ", ".join(sku_summary))
         filters = ctx.get("filters") or {}
         if filters:
             ff = []
             if filters.get("mall_id"):
-                ff.append(f"mall_id={filters['mall_id']}")
+                ff.append(f"店铺编号={filters['mall_id']}")
             if filters.get("country_code"):
                 ff.append(f"country={filters['country_code']}")
             if filters.get("owner"):
@@ -97,8 +97,9 @@ class AiOrchestrator:
             if ff:
                 parts.append("用户在 Dashboard 已选过滤: " + ", ".join(ff))
         parts.append(
-            "查询工具时,请基于上述上下文自动设置 mall_ids/country_codes/owners 参数;"
+            "查询工具时,请基于上述上下文自动设置店铺、国家、负责人等过滤条件;"
             "用户问'这个 SKU/这个店铺'就用上述值,不要反问。"
+            "这些编号和参数名仅供内部工具调用,不要在用户回答里展示。"
         )
         return "\n".join(parts)
 
@@ -154,7 +155,7 @@ class AiOrchestrator:
 
             if resp.finish_reason != "tool_calls" or not resp.tool_calls:
                 return OrchestratorOutput(
-                    content=resp.content,
+                    content=sanitize_user_ai_text(resp.content),
                     tool_iterations=iterations,
                     finish_reason=resp.finish_reason,
                 )
@@ -178,9 +179,9 @@ class AiOrchestrator:
 
         # 命中 max_iterations 上限
         logger.warning("ai_orchestrator_capped iterations=%d", iterations)
-        content = self._summarize_after_cap(msgs)
+        content = sanitize_user_ai_text(self._summarize_after_cap(msgs))
         return OrchestratorOutput(
-            content=content or last_content or self._cap_fallback_text(),
+            content=content or sanitize_user_ai_text(last_content) or self._cap_fallback_text(),
             tool_iterations=iterations,
             finish_reason="stop",
         )
@@ -218,20 +219,26 @@ class AiOrchestrator:
             async for delta in self._ai.chat_stream(messages=msgs, tools=self._tools):
                 # reasoning(思维链)增量 — 不入 assistant 历史,只透给客户端展示
                 if delta.reasoning_text and not delta.finish_reason:
-                    yield {"type": "reasoning_delta", "text": delta.reasoning_text}
+                    yield {
+                        "type": "reasoning_delta",
+                        "text": sanitize_user_ai_text(delta.reasoning_text),
+                    }
                 # 文本增量 — 实时透给客户端,同时累积进 assistant 上下文
                 if delta.text:
                     accumulated_text += delta.text
                     if not delta.finish_reason:
-                        yield {"type": "delta", "text": delta.text}
+                        yield {"type": "delta", "text": sanitize_user_ai_text(delta.text)}
                 if delta.finish_reason:
                     finish_reason = delta.finish_reason
                     if delta.tool_calls:
                         tool_calls = list(delta.tool_calls)
                     if delta.text and finish_reason != "tool_calls":
-                        yield {"type": "delta", "text": delta.text}
+                        yield {"type": "delta", "text": sanitize_user_ai_text(delta.text)}
                     if delta.reasoning_text:
-                        yield {"type": "reasoning_delta", "text": delta.reasoning_text}
+                        yield {
+                            "type": "reasoning_delta",
+                            "text": sanitize_user_ai_text(delta.reasoning_text),
+                        }
                     break
 
             if finish_reason != "tool_calls" or not tool_calls:
@@ -264,17 +271,22 @@ class AiOrchestrator:
                     ))
                 except Exception as e:  # noqa: BLE001
                     ok = False
-                    summary = f"{e.__class__.__name__}: {e}"
+                    summary = sanitize_user_ai_text(f"{e.__class__.__name__}: {e}")
                     msgs.append(ChatMessage(
                         role="tool",
                         content=json.dumps({"error": summary}, ensure_ascii=False),
                         tool_call_id=tc.id,
                     ))
-                yield {"type": "tool_end", "name": tc.name, "ok": ok, "summary": summary}
+                yield {
+                    "type": "tool_end",
+                    "name": tc.name,
+                    "ok": ok,
+                    "summary": sanitize_user_ai_text(summary),
+                }
             iterations += 1
 
         logger.warning("ai_orchestrator_stream_capped iterations=%d", iterations)
-        content = self._summarize_after_cap(msgs)
+        content = sanitize_user_ai_text(self._summarize_after_cap(msgs))
         yield {
             "type": "delta",
             "text": content,
@@ -292,7 +304,7 @@ def _short_tool_summary(name: str, result: Any) -> str:
         if "rows" in result and isinstance(result["rows"], list):
             return f"返回 {len(result['rows'])} 条"
         if "error" in result:
-            return f"失败:{result['error']}"
+            return f"失败:{sanitize_user_ai_text(str(result['error']))}"
         return f"返回 {len(result)} 字段"
     if isinstance(result, list):
         return f"返回 {len(result)} 条"
@@ -336,9 +348,6 @@ def _deterministic_tool_summary(payload: Any) -> str:
                 item_texts.append("、".join(parts))
         if item_texts:
             bits.append("Top 项: " + "; ".join(item_texts))
-        calc_run_id = payload.get("calc_run_id")
-        if calc_run_id:
-            bits.append(f"计算批次 {calc_run_id}")
         return "；".join(bits) + "。"
 
     summary = payload.get("summary")

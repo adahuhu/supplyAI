@@ -7,6 +7,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+StockScopeItem = str
+
+DEFAULT_STOCK_SCOPE: tuple[StockScopeItem, ...] = ("fba_available",)
+VALID_STOCK_SCOPE: tuple[StockScopeItem, ...] = (
+    "fba_available",
+    "fba_inbound",
+    "local_actual",
+    "local_plan",
+)
+
 
 @dataclass(frozen=True)
 class ReplenishmentRule:
@@ -22,6 +32,7 @@ class ReplenishmentRule:
     qc_days: int
     enabled: bool
     logistics_days: tuple[int, ...] = ()
+    stock_scope: tuple[StockScopeItem, ...] = DEFAULT_STOCK_SCOPE
 
 
 @dataclass
@@ -30,12 +41,25 @@ class ResolvedRule:
     scope_type: str  # sku / store / global / default
     safety_days: int
     lead_time_days: int
+    stock_scope: tuple[StockScopeItem, ...] = DEFAULT_STOCK_SCOPE
 
 
 _SCOPE_PRIORITY = {"sku": 3, "store": 2, "global": 1}
 
 DEFAULT_SAFETY_DAYS = 14
 DEFAULT_LEAD_TIME_DAYS = 20
+
+
+def normalize_stock_scope(value: object) -> tuple[StockScopeItem, ...]:
+    """归一化库存参与口径;为空或非法时回到默认:仅 FBA 可用."""
+    if not isinstance(value, (list, tuple)):
+        return DEFAULT_STOCK_SCOPE
+    out: list[StockScopeItem] = []
+    for item in value:
+        key = str(item or "").strip()
+        if key in VALID_STOCK_SCOPE and key not in out:
+            out.append(key)
+    return tuple(out) or DEFAULT_STOCK_SCOPE
 
 
 def _matches(rule: ReplenishmentRule, mall_id: int | None, msku: str) -> bool:
@@ -71,6 +95,7 @@ def resolve_rule(
             scope_type="default",
             safety_days=DEFAULT_SAFETY_DAYS,
             lead_time_days=DEFAULT_LEAD_TIME_DAYS,
+            stock_scope=DEFAULT_STOCK_SCOPE,
         )
     best = max(matched, key=lambda r: _SCOPE_PRIORITY.get(r.scope_type, 0))
     return ResolvedRule(
@@ -78,4 +103,5 @@ def resolve_rule(
         scope_type=best.scope_type,
         safety_days=best.safety_days,
         lead_time_days=_lead_time(best),
+        stock_scope=normalize_stock_scope(best.stock_scope),
     )

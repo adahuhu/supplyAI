@@ -1,7 +1,7 @@
 """4 个 Tool 实现 — 用 SQLAlchemy session 调真实仓储,返回结构化 dict.
 
 设计原则:
-  - 工具不重算业务结果;只查 mk_* 已计算的字段。
+  - 工具不重算业务结果;只查系统已计算好的结果。
   - generate_purchase_draft 必须 confirmed=True 才落库,否则返回预览。
 """
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from supplyai.domain.ai.client import ToolDef
+from supplyai.domain.ai.foundation import sanitize_user_ai_text
 from supplyai.repositories.dashboard_repo import DashboardRepository
 from supplyai.repositories.purchase_repo import PurchaseDraftRepository
 from supplyai.repositories.sku_repo import SkuRepository
@@ -33,8 +34,8 @@ def build_tools() -> list[ToolDef]:
             name="query_stockout_risk",
             description=(
                 "查询风险队列(P1>P2>P3>safe 排序),可按 mall_ids / country_codes / owners 过滤。"
-                "返回 listing_id/msku/priority/fba_sellable_days/action_hint/store_name 等。"
-                "如果用户在某 SKU 详情或选了店铺过滤,务必把对应 mall_id 传过来。"
+                "返回商品编号、MSKU、风险等级、FBA 可售天数、行动建议、店铺名称等。"
+                "如果用户在某 SKU 详情或选了店铺过滤,务必把对应店铺编号传过来。"
             ),
             parameters={
                 "type": "object",
@@ -47,7 +48,7 @@ def build_tools() -> list[ToolDef]:
                     "mall_ids": {
                         "type": "array",
                         "items": {"type": "integer"},
-                        "description": "按店铺 mall_id 过滤",
+                        "description": "按店铺编号过滤",
                     },
                     "country_codes": {
                         "type": "array",
@@ -67,7 +68,7 @@ def build_tools() -> list[ToolDef]:
         ToolDef(
             name="query_replenishment_advice",
             description=(
-                "查询某 SKU 或筛选范围内的备货建议(suggest_qty / suggest_amount / coverage_demand)。"
+                "查询某 SKU 或筛选范围内的备货建议,包含建议采购量、建议采购金额、覆盖周期需求。"
                 "支持 mall_ids / country_codes 过滤。"
             ),
             parameters={
@@ -99,7 +100,7 @@ def build_tools() -> list[ToolDef]:
         ToolDef(
             name="compare_logistics_options",
             description=(
-                "基于真实物流方式配置对比多种物流方案的成本和到货时间。给定 listing_id + 目标采购量,"
+                "基于真实物流方式配置对比多种物流方案的成本和到货时间。给定商品编号 + 目标采购量,"
                 "返回 plans 数组,每个方案含 mode/qty/days/estimated_cost；若未配置真实物流方式则返回错误。"
                 "适用于场景:'纯海运 vs 海+空混合,成本和风险?'"
             ),
@@ -117,8 +118,8 @@ def build_tools() -> list[ToolDef]:
         ToolDef(
             name="simulate_event_demand",
             description=(
-                "活动期需求模拟。给定 holiday_id 和用户期望日销目标,"
-                "结合 mk_holiday.sales_multiplier + 影响窗口算出活动期总需求 + 应备货量 + 最晚发货时间。"
+                "活动期需求模拟。给定节日编号和用户期望日销目标,"
+                "结合节日倍率和影响窗口算出活动期总需求 + 应备货量 + 最晚发货时间。"
                 "适用于场景:'Prime Day 想做到日销 X 单,要备多少货,何时发?'"
             ),
             parameters={
@@ -391,7 +392,9 @@ async def _t_simulate_event_demand(args: dict, session: AsyncSession) -> dict[st
     )
     if holiday is None:
         return {
-            "error": f"未找到 holiday_id={args['holiday_id']} 的节日,先用 query 工具拉 holidays 列表",
+            "error": sanitize_user_ai_text(
+                f"未找到 holiday_id={args['holiday_id']} 的节日,请先确认节日配置"
+            ),
         }
     daily_target = float(args["daily_target"])
     lead_time = int(args.get("lead_time_days", 25))

@@ -1,6 +1,29 @@
 // 规则设置弹窗 — 补货规则 + 销量预测 两 Tab
 // + 采购计划创建确认 modal
 
+const STOCK_SCOPE_OPTIONS = [
+  { key: 'fba_available', label: 'FBA 可用', short: 'FBA 可用' },
+  { key: 'fba_inbound', label: 'FBA 在途', short: '在途' },
+  { key: 'local_actual', label: '本地实际', short: '本地实际' },
+  { key: 'local_plan', label: '本地预计', short: '本地预计' },
+];
+const DEFAULT_STOCK_SCOPE = ['fba_available'];
+
+function normalizeStockScope(scope) {
+  const values = Array.isArray(scope) ? scope : DEFAULT_STOCK_SCOPE;
+  const next = values.filter((key, index) => (
+    STOCK_SCOPE_OPTIONS.some(opt => opt.key === key) && values.indexOf(key) === index
+  ));
+  return next.length ? next : [...DEFAULT_STOCK_SCOPE];
+}
+
+function formatStockScope(scope) {
+  const selected = normalizeStockScope(scope);
+  return selected
+    .map(key => STOCK_SCOPE_OPTIONS.find(opt => opt.key === key)?.short || key)
+    .join(' + ');
+}
+
 function getRuleTargets(scope, ctx) {
   if (scope === 'global') return [{ scope_type: 'global', mall_id: null, msku: null }];
   if (ctx?.batch && ctx.skus && ctx.skus.length) {
@@ -49,6 +72,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
   const [purchaseDuration, setPurchaseDuration] = React.useState(12);
   const [purchaseDelivery, setPurchaseDelivery] = React.useState(5);
   const [qcDays, setQcDays] = React.useState(3);
+  const [stockScope, setStockScope] = React.useState([...DEFAULT_STOCK_SCOPE]);
   const [logistics, setLogistics] = React.useState([
     { id: 1, mode: '海运', days: 35 },
     { id: 2, mode: '空运', days: 8 },
@@ -81,6 +105,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
     const target = targets && targets.length === 1 ? targets[0] : null;
     setReplenishRuleId(null);
     setForecastRuleId(null);
+    setStockScope([...DEFAULT_STOCK_SCOPE]);
     if (!target || (target.scope_type === 'sku' && (!target.mall_id || !target.msku))) return;
 
     let cancelled = false;
@@ -101,6 +126,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
         setPurchaseDuration(Number(replenish.purchase_duration_days ?? 0));
         setPurchaseDelivery(Number(replenish.delivery_days ?? 0));
         setQcDays(Number(replenish.qc_days ?? 0));
+        setStockScope(normalizeStockScope(replenish.stock_scope));
         if (Array.isArray(replenish.logistics_methods) && replenish.logistics_methods.length) {
           setLogistics(replenish.logistics_methods.map((m, i) => ({
             id: `${replenish.rule_id || 'rule'}-${i}`,
@@ -214,6 +240,7 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
             purchase_duration_days: purchaseDuration,
             delivery_days: purchaseDelivery,
             qc_days: qcDays,
+            stock_scope: normalizeStockScope(stockScope),
             logistics_methods: logistics.map(l => ({
               mode: l.mode,
               days: Number(l.days || 0),
@@ -380,6 +407,8 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
             logistics={logistics} setLogistics={setLogistics}
             purchaseLeadTime={purchaseLeadTime}
             totalCoverage={totalCoverage}
+            stockScope={stockScope}
+            setStockScope={setStockScope}
           />
         ) : (
           <ForecastTab
@@ -434,7 +463,16 @@ function FieldRow({ label, hint, children, suffix }) {
   );
 }
 
-function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDuration, purchaseDelivery, setPurchaseDelivery, qcDays, setQcDays, logistics, setLogistics, purchaseLeadTime, totalCoverage }) {
+function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDuration, purchaseDelivery, setPurchaseDelivery, qcDays, setQcDays, logistics, setLogistics, purchaseLeadTime, totalCoverage, stockScope, setStockScope }) {
+  const selectedStockScope = normalizeStockScope(stockScope);
+  const toggleStockScope = (key) => {
+    const has = selectedStockScope.includes(key);
+    const next = has
+      ? selectedStockScope.filter(item => item !== key)
+      : [...selectedStockScope, key];
+    setStockScope(normalizeStockScope(next));
+  };
+
   return (
     <>
       <div style={{ flex: 1, padding: 18, overflow: 'auto' }}>
@@ -485,6 +523,41 @@ function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDura
         <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
           <Icon name="info" size={11}/>同一规则下运输方式不可重复 · 计算时永远取最长物流时效
         </div>
+
+        <div className="divider" style={{ margin: '14px 0' }}/>
+
+        <div className="label" style={{ marginBottom: 8 }}>库存参与口径</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+          {STOCK_SCOPE_OPTIONS.map(opt => {
+            const checked = selectedStockScope.includes(opt.key);
+            return (
+              <label key={opt.key} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '9px 10px',
+                border: '1px solid ' + (checked ? 'var(--accent)' : 'var(--border)'),
+                borderRadius: 'var(--r)',
+                background: checked ? 'var(--accent-soft)' : 'var(--surface)',
+                color: checked ? 'var(--accent-text)' : 'var(--text-2)',
+                cursor: 'pointer',
+                fontSize: 12,
+                userSelect: 'none',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleStockScope(opt.key)}
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span>{opt.label}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Icon name="info" size={11}/>可售天数和建议采购量会按所选库存口径重新计算；默认仅 FBA 可用。
+        </div>
       </div>
 
       {/* Right summary */}
@@ -495,7 +568,7 @@ function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDura
             sub={`= 采购 ${purchaseDuration} + 交期 ${purchaseDelivery} + 质检 ${qcDays} + 物流 ${Math.max(...logistics.map(l => l.days))}`}/>
           <SummaryItem k="总覆盖周期" v={totalCoverage + ' 天'} sub={`= 采购时效 ${purchaseLeadTime} + 安全 ${safeDays}`} highlight/>
           <SummaryItem k="安全库存公式" v="未来日销 × 安全天数" mono/>
-          <SummaryItem k="库存参与口径" v="FBA 可用 + 在途 + 本地实际 + 本地预计" mono/>
+          <SummaryItem k="库存参与口径" v={formatStockScope(selectedStockScope)} mono/>
           <SummaryItem k="断货时间口径" v="仅 FBA 侧（不含本地）" mono/>
         </div>
       </div>

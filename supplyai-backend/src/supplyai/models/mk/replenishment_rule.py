@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, Integer, String
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from supplyai.models.base import Base
@@ -31,6 +31,7 @@ class MkReplenishmentRule(Base):
     purchase_duration_days: Mapped[int] = mapped_column(Integer, default=0)
     delivery_days: Mapped[int] = mapped_column(Integer, default=0)
     qc_days: Mapped[int] = mapped_column(Integer, default=0)
+    stock_scope_json: Mapped[list | None] = mapped_column(JSON, default=list)
     rule_version: Mapped[str | None] = mapped_column(String(30))
     enabled: Mapped[int] = mapped_column(Integer, default=1)
     updated_by: Mapped[str | None] = mapped_column(String(50))

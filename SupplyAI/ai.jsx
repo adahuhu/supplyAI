@@ -1,10 +1,49 @@
 // AI panels — global (Dashboard) and per-SKU (detail).
 
+function sanitizeAIVisibleText(value) {
+  if (value == null) return '';
+  let text = String(value);
+  const replacements = [
+    ['mk_supply_sku_daily_stat', '备货分析结果'],
+    ['mk_purchase_draft', '采购计划草稿'],
+    ['mk_holiday', '节日配置'],
+    ['mk_sku_inbound_detail', '在途明细'],
+    ['rl_fba_shipment_item', 'FBA 发货记录'],
+    ['rl_amz_sales_daily_report', '销量记录'],
+    ['rl_product', '商品资料'],
+    ['calc_run_id', '系统快照'],
+    ['listing_id', '商品编号'],
+    ['mall_id', '店铺编号'],
+    ['tenant_id', '账号信息'],
+    ['holiday_id', '节日编号'],
+    ['suggest_qty', '建议采购量'],
+    ['suggest_amount', '建议采购金额'],
+    ['coverage_demand', '覆盖周期需求'],
+    ['fba_sellable_days', 'FBA 可售天数'],
+    ['stockout_date', '预计断货日期'],
+    ['purchase_date', '建议采购日期'],
+    ['forecast_source', '预测来源'],
+    ['unit_cost', '单位成本'],
+  ];
+  replacements.forEach(([raw, label]) => {
+    text = text.replace(new RegExp(`\\b${raw}\\b`, 'g'), label);
+  });
+  return text
+    .replace(/\b(?:mk|rl)_[A-Za-z0-9_]+\b/g, '系统数据')
+    .replace(/\bSQL\b/gi, '数据查询');
+}
+
+function renderAIVisibleMarkdown(value) {
+  const text = sanitizeAIVisibleText(value);
+  return window.renderMarkdown ? window.renderMarkdown(text) : text;
+}
+
 // 思考折叠面板:流式期间默认展开看 AI 在想什么;思考完成后默认折叠,可手动展开。
 function ReasoningPanel({ text, active }) {
   // active = true 时表示思考正在进行(还没有 content delta)
   const [open, setOpen] = React.useState(true);
   const wasActiveRef = React.useRef(active);
+  const visibleText = sanitizeAIVisibleText(text);
   // 从 active=true → false 时(思考结束)自动折叠
   React.useEffect(() => {
     if (wasActiveRef.current && !active) setOpen(false);
@@ -37,7 +76,7 @@ function ReasoningPanel({ text, active }) {
           {active ? '思考中…' : '已完成思考'}
         </span>
         <span style={{ color: 'var(--text-4)', fontSize: 10.5 }}>
-          · {text.length} 字
+          · {visibleText.length} 字
         </span>
         <span style={{ flex: 1 }}/>
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} color="var(--text-3)"/>
@@ -54,7 +93,7 @@ function ReasoningPanel({ text, active }) {
           maxHeight: 260,
           overflow: 'auto',
         }}>
-          {text}
+          {visibleText}
         </div>
       )}
     </div>
@@ -310,7 +349,7 @@ function AIDecisionCard({ text, sku, onAction, onCreatePlan }) {
         fontSize: 13,
         lineHeight: 1.7,
         color: 'var(--text-1)',
-      }} dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(text) : text }}/>
+      }} dangerouslySetInnerHTML={{ __html: renderAIVisibleMarkdown(text) }}/>
     );
   }
   const metricStyle = {
@@ -329,7 +368,7 @@ function AIDecisionCard({ text, sku, onAction, onCreatePlan }) {
   const amountSub = advice.amountMissing
     ? (advice.referenceAmount != null
       ? `AI 返回基准参考 ${adviceFormatMoney(advice.referenceAmount, advice.currency)}，需采购确认`
-      : '缺少 unit_cost，需补充单价')
+      : '缺少单位成本，需补充单价')
     : (advice.unitCost != null
       ? `参考单价 ${adviceFormatMoney(advice.unitCost, advice.currency)}`
       : (advice.amountMode === 'reference' ? '基准币参考值，需采购确认' : '系统计算金额'));
@@ -1052,7 +1091,7 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
       const msgs = [];
       for (const m of history) {
         if (m.role === 'user' && m.text) msgs.push({ role: 'user', content: m.text });
-        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: m.text });
+        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: sanitizeAIVisibleText(m.text) });
       }
       msgs.push({ role: 'user', content: text });
       const context = { current_page: 'dashboard' };
@@ -1157,10 +1196,10 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
                   />
                 )}
                 {m.text && (m.explain
-                  ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                  ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: renderAIVisibleMarkdown(m.text) }}/>
                   : <StructuredAICard
                       card={m.card}
-                      text={m.text}
+                      text={sanitizeAIVisibleText(m.text)}
                       setRoute={setRoute}
                       openCreatePO={openCreatePO}
                       openRules={openRules}
@@ -1285,7 +1324,7 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
       const msgs = [];
       for (const m of history) {
         if (m.role === 'user' && m.text) msgs.push({ role: 'user', content: m.text });
-        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: m.text });
+        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: sanitizeAIVisibleText(m.text) });
       }
       msgs.push({ role: 'user', content: text });
       const context = {
@@ -1406,10 +1445,10 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
                   />
                 )}
                 {m.text && (m.explain
-                  ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: window.renderMarkdown ? window.renderMarkdown(m.text) : m.text }}/>
+                  ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: renderAIVisibleMarkdown(m.text) }}/>
                   : <StructuredAICard
                       card={m.card}
-                      text={m.text}
+                      text={sanitizeAIVisibleText(m.text)}
                       sku={sku}
                       openCreatePO={openCreatePO}
                       openRules={openRules}

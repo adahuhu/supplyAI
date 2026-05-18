@@ -41,6 +41,7 @@ def test_resolve_no_rules_returns_default() -> None:
     assert out.safety_days == 14
     assert out.lead_time_days == 20  # default
     assert out.rule_id is None
+    assert out.stock_scope == ("fba_available",)
 
 
 def test_resolve_global_only() -> None:
@@ -126,3 +127,20 @@ def test_resolve_lead_time_includes_longest_logistics() -> None:
     )
     out = resolve_rule(rules=[rule], mall_id=1001, msku="MSKU-X")
     assert out.lead_time_days == 50
+
+
+def test_resolve_rule_normalizes_stock_scope() -> None:
+    rule = ReplenishmentRule(
+        rule_id="r-stock",
+        scope_type="global",
+        mall_id=None,
+        msku=None,
+        safety_days=10,
+        purchase_duration_days=5,
+        delivery_days=7,
+        qc_days=3,
+        enabled=True,
+        stock_scope=("fba_available", "local_actual", "bad", "local_actual"),
+    )
+    out = resolve_rule(rules=[rule], mall_id=1001, msku="MSKU-X")
+    assert out.stock_scope == ("fba_available", "local_actual")

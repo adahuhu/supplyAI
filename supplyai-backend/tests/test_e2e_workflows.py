@@ -476,7 +476,7 @@ class TestEpic6DataConsistency:
     ) -> None:
         """US-6.2: 所有 P1 SKU 的 suggest_qty 满足公式.
 
-        suggest_qty == max(0, ceil(coverage_demand - total_stock))
+        suggest_qty == max(0, ceil(coverage_demand - planning_stock))
         这是产品最核心的可信承诺,违反 = 系统数学不自洽。
         """
         listed = await client.post(
@@ -489,7 +489,9 @@ class TestEpic6DataConsistency:
         )
         for r in listed.json()["rows"]:
             cov = r.get("coverage_demand")
-            stock = r.get("total_stock") or 0
+            stock = r.get("planning_stock")
+            if stock is None:
+                stock = r.get("fba_available") or 0
             if cov is None:
                 continue
             expected = max(0, math.ceil(cov - stock))

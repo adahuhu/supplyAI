@@ -37,6 +37,7 @@ async def test_upsert_creates_new_rule(client: AsyncClient) -> None:
             "purchase_duration_days": 5,
             "delivery_days": 25,
             "qc_days": 3,
+            "stock_scope": ["fba_available", "local_actual"],
             "enabled": True,
             "updated_by": "pytest",
         },
@@ -46,6 +47,7 @@ async def test_upsert_creates_new_rule(client: AsyncClient) -> None:
     assert data["rule_id"].startswith("RULE-")
     assert data["scope_type"] == "store"
     assert data["safety_days"] == 21
+    assert data["stock_scope"] == ["fba_available", "local_actual"]
 
 
 async def test_upsert_updates_existing_rule(client: AsyncClient) -> None:

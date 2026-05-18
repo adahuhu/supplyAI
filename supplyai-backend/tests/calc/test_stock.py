@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from supplyai.domain.calc.stock import StockBreakdown, aggregate_stock, fba_inbound_total
+from supplyai.domain.calc.stock import (
+    StockBreakdown,
+    aggregate_stock,
+    fba_inbound_total,
+    participating_stock,
+)
 
 
 def test_fba_inbound_total_sums_three_legs() -> None:
@@ -76,3 +81,25 @@ def test_sellable_days_zero_stock() -> None:
     from supplyai.domain.calc.stock import sellable_days
 
     assert sellable_days(stock=0, daily=10) == pytest.approx(0.0)
+
+
+def test_participating_stock_defaults_to_fba_available() -> None:
+    stock = StockBreakdown(
+        fba_available=100,
+        fba_inbound=35,
+        local_actual=30,
+        local_plan=15,
+        total_stock=180,
+    )
+    assert participating_stock(stock) == 100
+
+
+def test_participating_stock_uses_configured_scope() -> None:
+    stock = StockBreakdown(
+        fba_available=100,
+        fba_inbound=35,
+        local_actual=30,
+        local_plan=15,
+        total_stock=180,
+    )
+    assert participating_stock(stock, ("fba_available", "fba_inbound", "local_plan")) == 150

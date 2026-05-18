@@ -69,6 +69,8 @@ class SkuSummaryDTO(BaseModel):
     coverage_demand: float | None
     # 库存与时效
     total_stock: int | None
+    planning_stock: int | None = None
+    stock_scope: list[str] = Field(default_factory=lambda: ["fba_available"])
     fba_available: int | None
     fba_inbound: int | None  # = working + shipped + receiving
     local_actual: int | None

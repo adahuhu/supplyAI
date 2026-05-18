@@ -7,6 +7,7 @@ from __future__ import annotations
 import math
 
 from httpx import AsyncClient
+import pytest
 
 
 async def test_calc_run_creates_new_calc_run_record(client: AsyncClient) -> None:
@@ -54,7 +55,7 @@ async def test_calc_run_produces_48_snapshots(client: AsyncClient) -> None:
 
 
 async def test_calc_run_suggest_qty_satisfies_formula(client: AsyncClient) -> None:
-    """对一个 P1 SKU,验证 suggest_qty == ceil(max(0, coverage - stock))."""
+    """对一个 P1 SKU,验证 suggest_qty 按规则库存参与口径扣减."""
     run_resp = await client.post(
         "/api/supplyai/calc/run", json={"tenant_id": 100228}
     )
@@ -74,7 +75,9 @@ async def test_calc_run_suggest_qty_satisfies_formula(client: AsyncClient) -> No
 
     for row in rows:
         cov = row.get("coverage_demand")
-        stock = row.get("total_stock") or 0
+        stock = row.get("planning_stock")
+        if stock is None:
+            stock = row.get("fba_available") or 0
         qty = row["suggest_qty"]
         if cov is None:
             continue
@@ -83,6 +86,30 @@ async def test_calc_run_suggest_qty_satisfies_formula(client: AsyncClient) -> No
             f"SKU {row['msku']}: suggest_qty={qty} expected={expected} "
             f"(coverage={cov}, stock={stock})"
         )
+
+
+async def test_calc_run_default_stock_scope_is_fba_available(
+    client: AsyncClient,
+) -> None:
+    """默认库存参与口径为仅 FBA 可用,可售天数也使用该口径."""
+    run_resp = await client.post(
+        "/api/supplyai/calc/run", json={"tenant_id": 100228}
+    )
+    new_id = run_resp.json()["calc_run_id"]
+
+    list_resp = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "calc_run_id": new_id, "page_size": 10},
+    )
+    for row in list_resp.json()["rows"]:
+        assert row["stock_scope"] == ["fba_available"]
+        assert row["planning_stock"] == (row.get("fba_available") or 0)
+        daily = row.get("future_daily") or 0
+        if daily > 0:
+            assert row["sellable_days"] == pytest.approx(
+                round(row["planning_stock"] / daily, 2),
+                abs=0.02,
+            )
 
 
 async def test_calc_run_risk_level_matches_fba_sellable_days(

@@ -616,10 +616,11 @@ function recalcSkuForecastList(sku, nextDaily) {
   const daily = Math.max(0, Number(nextDaily) || 0);
   sku.futureDaily = +daily.toFixed(2);
   sku.coverageDemand = +(sku.totalCoverage * daily).toFixed(2);
-  sku.sellable = daily > 0 ? +(sku.totalStock / daily).toFixed(2) : 0;
+  const planningStock = sku.planningStock ?? sku.fbaAvail ?? 0;
+  sku.sellable = daily > 0 ? +(planningStock / daily).toFixed(2) : 0;
   sku.fbaSellable = daily > 0 ? +((sku.fbaAvail + sku.fbaInTransit) / daily).toFixed(2) : 0;
   sku.localSellable = daily > 0 ? +((sku.localTotal || 0) / daily).toFixed(2) : 0;
-  sku.suggestQty = Math.max(0, Math.ceil(sku.coverageDemand - sku.totalStock));
+  sku.suggestQty = Math.max(0, Math.ceil(sku.coverageDemand - planningStock));
   sku.suggest = sku.suggestQty > 0;
   const asOf = DASH_STATS.asOf || new Date();
   sku.stockoutDate = daily > 0 ? dateAddList(asOf, sku.fbaSellable) : null;

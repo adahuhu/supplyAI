@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from supplyai.domain.calc.rules import DEFAULT_STOCK_SCOPE, normalize_stock_scope
+
 
 def _z(v: int | None) -> int:
     return v or 0
@@ -61,3 +63,20 @@ def sellable_days(*, stock: int | float, daily: int | float) -> float | None:
     if daily == 0:
         return None
     return float(stock) / float(daily)
+
+
+def participating_stock(
+    stock: StockBreakdown, scope: object = DEFAULT_STOCK_SCOPE
+) -> int:
+    """按规则配置计算参与备货判断的库存量."""
+    total = 0
+    for item in normalize_stock_scope(scope):
+        if item == "fba_available":
+            total += stock.fba_available
+        elif item == "fba_inbound":
+            total += stock.fba_inbound
+        elif item == "local_actual":
+            total += stock.local_actual
+        elif item == "local_plan":
+            total += stock.local_plan
+    return total

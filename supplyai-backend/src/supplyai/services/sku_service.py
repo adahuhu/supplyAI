@@ -135,6 +135,8 @@ def _row_to_dto(
         forecast_source=stat.forecast_source,
         coverage_demand=_to_float(stat.coverage_demand),
         total_stock=stat.total_stock,
+        planning_stock=stat.planning_stock if stat.planning_stock is not None else stat.fba_available,
+        stock_scope=stat.stock_scope_json or ["fba_available"],
         fba_available=stat.fba_available,
         fba_inbound=fba_inbound,
         local_actual=stat.local_actual,

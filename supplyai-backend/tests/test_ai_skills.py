@@ -1,8 +1,8 @@
 """Foundation Skills + AiAnswer.status 测试.
 
 约束(技术方案 §7.5):
-  - AI 只解释 mk_* 已计算结果,不重算 suggest_qty / sellable_days
-  - 口径锁定到同一 calc_run_id
+  - AI 只解释系统已计算结果,不重算建议采购量 / 可售天数
+  - 口径锁定到同一系统快照
   - 预计断货 = FBA 侧;采购时间 = 全链路
   - 缺失值 / 估算 / 多币种必须显式说明
   - 采购草稿动作必须二次确认 SKU/数量/供应商
@@ -20,6 +20,7 @@ from supplyai.domain.ai.foundation import (
     SYSTEM_PROMPT,
     build_explain_prompt,
     classify_status,
+    sanitize_user_ai_text,
 )
 
 
@@ -27,9 +28,11 @@ from supplyai.domain.ai.foundation import (
 
 
 def test_system_prompt_includes_calc_run_id_constraint() -> None:
-    """system prompt 必须告诉模型口径锁定 calc_run_id."""
-    assert "calc_run_id" in SYSTEM_PROMPT
+    """system prompt 必须告诉模型口径锁定同一系统快照."""
+    assert "系统快照" in SYSTEM_PROMPT
     assert "口径" in SYSTEM_PROMPT or "同一" in SYSTEM_PROMPT
+    assert "calc_run_id" not in SYSTEM_PROMPT
+    assert "mk_" not in SYSTEM_PROMPT
 
 
 def test_system_prompt_includes_no_recompute_constraint() -> None:
@@ -77,8 +80,10 @@ class _FakeDto:
 def test_explain_prompt_carries_structured_context() -> None:
     """prompt 必须把关键字段都喂给模型,不能让模型猜."""
     p = build_explain_prompt(_FakeDto(), calc_run_id="DEMO-123")
-    for token in ["MS40060", "B000000048", "p1", "1.99", "923", "DEMO-123"]:
+    for token in ["MS40060", "B000000048", "p1", "1.99", "923"]:
         assert str(token) in p, f"prompt 缺字段:{token}"
+    assert "DEMO-123" not in p
+    assert "calc_run_id" not in p
 
 
 def test_explain_prompt_marks_missing_fields() -> None:
@@ -99,6 +104,15 @@ def test_explain_prompt_marks_missing_fields() -> None:
 
     p = build_explain_prompt(Empty(), calc_run_id="DEMO-X")
     assert "缺失" in p or "未知" in p or "—" in p
+
+
+def test_sanitize_user_ai_text_hides_internal_names() -> None:
+    text = "基于 mk_supply_sku_daily_stat 和 rl_fba_shipment_item, calc_run_id=R1, suggest_qty=20。"
+    cleaned = sanitize_user_ai_text(text)
+    for raw in ["mk_supply_sku_daily_stat", "rl_fba_shipment_item", "calc_run_id", "suggest_qty"]:
+        assert raw not in cleaned
+    assert "备货分析结果" in cleaned
+    assert "FBA 发货记录" in cleaned
 
 
 # ============ classify_status 分级 ============

@@ -13,8 +13,13 @@ from typing import Literal
 
 from supplyai.domain.calc.forecast import ForecastInput, compute_forecast
 from supplyai.domain.calc.risk import classify_risk, compute_stockout_date
-from supplyai.domain.calc.rules import ReplenishmentRule, resolve_rule
-from supplyai.domain.calc.stock import aggregate_stock, sellable_days
+from supplyai.domain.calc.rules import (
+    DEFAULT_STOCK_SCOPE,
+    ReplenishmentRule,
+    normalize_stock_scope,
+    resolve_rule,
+)
+from supplyai.domain.calc.stock import aggregate_stock, participating_stock, sellable_days
 from supplyai.domain.calc.suggest import SuggestInput, compute_suggest
 from supplyai.models.mk import (
     MkCalcRun,
@@ -150,6 +155,9 @@ class CalcService:
                 qc_days=r.qc_days,
                 enabled=bool(r.enabled),
                 logistics_days=logistics_by_rule.get(r.rule_id, ()),
+                stock_scope=normalize_stock_scope(
+                    r.stock_scope_json or DEFAULT_STOCK_SCOPE
+                ),
             )
             for r in orm_rules
         ]
@@ -193,7 +201,10 @@ class CalcService:
         )
 
         # 4. 可售天数
-        sd = sellable_days(stock=stock.total_stock, daily=fc.forecast_daily)
+        # sellable_days / suggest_qty 使用规则配置的库存参与口径;
+        # total_stock 仍保留完整库存结构,用于展示和库存构成分析。
+        planning_stock = participating_stock(stock, resolved.stock_scope)
+        sd = sellable_days(stock=planning_stock, daily=fc.forecast_daily)
         fba_only_stock = stock.fba_available + stock.fba_inbound
         fsd = sellable_days(stock=fba_only_stock, daily=fc.forecast_daily)
         local_sd = sellable_days(
@@ -208,7 +219,7 @@ class CalcService:
         sug = compute_suggest(
             SuggestInput(
                 forecast_daily=fc.forecast_daily,
-                total_stock=stock.total_stock,
+                total_stock=planning_stock,
                 lead_time_days=resolved.lead_time_days,
                 safety_days=resolved.safety_days,
                 today=today,
@@ -259,6 +270,8 @@ class CalcService:
             local_actual=stock.local_actual,
             local_plan=stock.local_plan,
             total_stock=stock.total_stock,
+            planning_stock=planning_stock,
+            stock_scope_json=list(resolved.stock_scope),
             sellable_days=Decimal(str(round(sd, 2))) if sd is not None else None,
             fba_sellable_days=Decimal(str(round(fsd, 2))) if fsd is not None else None,
             local_sellable_days=Decimal(str(round(local_sd, 2)))

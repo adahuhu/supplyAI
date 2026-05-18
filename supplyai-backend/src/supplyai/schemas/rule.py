@@ -31,6 +31,7 @@ class RuleDTO(BaseModel):
     purchase_duration_days: int
     delivery_days: int
     qc_days: int
+    stock_scope: list[str] = Field(default_factory=lambda: ["fba_available"])
     rule_version: str | None
     enabled: bool
     updated_by: str | None
@@ -60,6 +61,7 @@ class RuleUpsertRequest(BaseModel):
     purchase_duration_days: int = 0
     delivery_days: int = 0
     qc_days: int = 0
+    stock_scope: list[str] | None = None
     rule_version: str | None = None
     enabled: bool = True
     updated_by: str | None = None

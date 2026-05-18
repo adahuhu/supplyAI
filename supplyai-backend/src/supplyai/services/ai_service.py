@@ -15,6 +15,7 @@ from supplyai.domain.ai.foundation import (
     SYSTEM_PROMPT,
     build_explain_prompt,
     classify_status,
+    sanitize_user_ai_text,
 )
 from supplyai.domain.ai.orchestrator import AiOrchestrator
 from supplyai.repositories.dashboard_repo import DashboardRepository
@@ -190,11 +191,11 @@ class AiService:
                     ChatMessage(role="user", content=prompt),
                 ]
             )
-            explanation = chat_resp.content
+            explanation = sanitize_user_ai_text(chat_resp.content)
         except Exception as e:  # noqa: BLE001
             logger.warning("ai_explain_degraded: %s", e)
             ai_available = False
-            explanation = _degraded_explanation(ctx)
+            explanation = sanitize_user_ai_text(_degraded_explanation(ctx))
 
         status = classify_status(ctx, ai_available=ai_available)
 
@@ -232,15 +233,21 @@ class AiService:
             async for delta in self._ai.chat_stream(messages=msgs):
                 if delta.reasoning_text and not delta.finish_reason:
                     got_any = True
-                    yield {"type": "reasoning_delta", "text": delta.reasoning_text}
+                    yield {
+                        "type": "reasoning_delta",
+                        "text": sanitize_user_ai_text(delta.reasoning_text),
+                    }
                 if delta.text and not delta.finish_reason:
                     got_any = True
-                    yield {"type": "delta", "text": delta.text}
+                    yield {"type": "delta", "text": sanitize_user_ai_text(delta.text)}
                 if delta.finish_reason:
                     if delta.reasoning_text:
-                        yield {"type": "reasoning_delta", "text": delta.reasoning_text}
+                        yield {
+                            "type": "reasoning_delta",
+                            "text": sanitize_user_ai_text(delta.reasoning_text),
+                        }
                     if delta.text:
-                        yield {"type": "delta", "text": delta.text}
+                        yield {"type": "delta", "text": sanitize_user_ai_text(delta.text)}
                     status = classify_status(ctx, ai_available=True)
                     yield {
                         "type": "done",
@@ -250,11 +257,11 @@ class AiService:
                     return
             # 流没拿到任何 delta 也没显式 finish_reason → 降级
             if not got_any:
-                yield {"type": "delta", "text": _degraded_explanation(ctx)}
+                yield {"type": "delta", "text": sanitize_user_ai_text(_degraded_explanation(ctx))}
             yield {"type": "done", "finish_reason": "stop", "status": "degraded"}
         except Exception as e:  # noqa: BLE001
             logger.warning("ai_explain_stream_degraded: %s", e)
-            yield {"type": "delta", "text": _degraded_explanation(ctx)}
+            yield {"type": "delta", "text": sanitize_user_ai_text(_degraded_explanation(ctx))}
             yield {"type": "done", "finish_reason": "stop", "status": "degraded"}
 
     async def chat(self, req: ChatRequest) -> ChatResponseMessage:
@@ -273,7 +280,7 @@ class AiService:
                     messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), *user_msgs]
                 )
                 return ChatResponseMessage(
-                    content=resp.content,
+                    content=sanitize_user_ai_text(resp.content),
                     model=settings.ai_model,
                     finish_reason=resp.finish_reason,
                     status="ok",
@@ -319,9 +326,12 @@ class AiService:
                 msgs = [ChatMessage(role="system", content=SYSTEM_PROMPT), *user_msgs]
                 async for delta in self._ai.chat_stream(messages=msgs):
                     if delta.reasoning_text and not delta.finish_reason:
-                        yield {"type": "reasoning_delta", "text": delta.reasoning_text}
+                        yield {
+                            "type": "reasoning_delta",
+                            "text": sanitize_user_ai_text(delta.reasoning_text),
+                        }
                     if delta.text and not delta.finish_reason:
-                        yield {"type": "delta", "text": delta.text}
+                        yield {"type": "delta", "text": sanitize_user_ai_text(delta.text)}
                     if delta.finish_reason:
                         yield {
                             "type": "done",
