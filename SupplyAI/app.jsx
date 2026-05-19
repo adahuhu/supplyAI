@@ -68,6 +68,8 @@ function App() {
   const [rulesCtx, setRulesCtx] = React.useState(null);
   const [poIds, setPoIds] = React.useState(null);
   const [toast, setToast] = React.useState('');
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [asOf, setAsOf] = React.useState(() => DASH_STATS.asOf || new Date());
   // 后端连接状态: 'connecting' → 'online' / 'error'(无降级 mock,失败即拒绝渲染)
   const [conn, setConn] = React.useState('connecting');
   const [connError, setConnError] = React.useState('');
@@ -138,6 +140,7 @@ function App() {
       window.ME_DATA = window.adapter.adaptMe(meResp);
 
       setConn('online');
+      setAsOf(stats.asOf || new Date());
       bumpVersion();
     } catch (err) {
       console.error('[bootstrap] backend error:', err);
@@ -230,12 +233,18 @@ function App() {
         <Topbar
           onAI={() => setAiOpen(v => !v)}
           onRefresh={async () => {
+            if (refreshing) return;
+            setRefreshing(true);
             showToast('正在重新计算…');
             await refreshFromBackend();
-            showToast('已刷新 · ' + fmt.time(new Date()));
+            const now = new Date();
+            setAsOf(now);
+            setRefreshing(false);
+            showToast('已刷新 · ' + fmt.time(now));
           }}
+          refreshing={refreshing}
           onToggleSidebar={() => setSidebarCollapsed(v => !v)}
-          asOf={DASH_STATS.asOf}
+          asOf={asOf}
           conn={conn}
           onSearch={(kw) => setRoute({ page: 'list', keyword: kw })}
         />

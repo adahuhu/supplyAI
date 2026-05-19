@@ -706,7 +706,7 @@ function buildPersistedForecastV7(forecastSeries, futDays, holidays) {
   });
 }
 
-function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, startInv, invOverrides, forecastSeries) {
+function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, startInv, invOverrides, forecastSeries, inboundByDay = {}) {
   const persistedDemand = buildPersistedForecastV7(forecastSeries, futDays, holidays);
   const demand = persistedDemand.length >= futDays
     ? persistedDemand
@@ -757,8 +757,8 @@ function TrendPanelV7({ sku }) {
     [sku.id, JSON.stringify(sku.inboundList)]
   );
   const forecast = React.useMemo(
-    () => buildStockConstrainedForecastV7(sku.futureDaily, range.futDays, holidays, sku.totalStock, invOverrides, sku.forecastSeries),
-    [sku.futureDaily, sku.totalStock, range.futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(sku.forecastSeries || [])]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, range.futDays, holidays, sku.totalStock, invOverrides, sku.forecastSeries, inboundByDay),
+    [sku.futureDaily, sku.totalStock, range.futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(sku.forecastSeries || []), JSON.stringify(inboundByDay)]
   );
   const adjAvg = range.futDays > 0
     ? Math.round(forecast.reduce((sum, item) => sum + item.value, 0) / Math.max(1, forecast.length))

@@ -109,7 +109,7 @@ function Sidebar({ route, setRoute, collapsed }) {
   );
 }
 
-function Topbar({ onAI, onRefresh, onToggleSidebar, asOf, conn = 'connecting', onSearch }) {
+function Topbar({ onAI, onRefresh, onToggleSidebar, asOf, conn = 'connecting', onSearch, refreshing = false }) {
   // 错误时仍显示红点 + 错误文案;正常 / 连接中不再露出"后端已连接"等提示。
   const connError = conn === 'error';
   const [q, setQ] = React.useState('');
@@ -173,7 +173,9 @@ function Topbar({ onAI, onRefresh, onToggleSidebar, asOf, conn = 'connecting', o
           </span>
         )}
         {!narrow && <span>{fmt.dateLong(asOf)} {fmt.time(asOf)}</span>}
-        <button className="btn ghost icon sm" onClick={onRefresh} title="重新计算"><Icon name="refresh" size={13}/></button>
+        <button className="btn ghost icon sm" onClick={onRefresh} title="重新计算" disabled={refreshing}>
+          <span className={refreshing ? 'spinning' : ''}><Icon name="refresh" size={13}/></span>
+        </button>
       </div>
 
       <button className={narrow ? 'btn icon sm' : 'btn'} onClick={onAI} style={{ gap: 6 }} title="AI 分析">
