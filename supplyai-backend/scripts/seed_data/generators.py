@@ -24,6 +24,10 @@ from scripts.seed_data.constants import (
 # 固定 seed 保证演示数据稳定
 random.seed(SEED)
 
+# 固定 3 个 SKU 作为“近 7 天 FBA 可用断货”样本。
+# 它们本身都是 P1, 保持风险分布稳定；仅把可用库存转入在途库存。
+MOCK_RECENT_STOCKOUT_LISTING_IDS = {1000005, 1000009, 1000011}
+
 
 @dataclass
 class SkuSeed:
@@ -285,6 +289,10 @@ def generate_skus() -> list[SkuSeed]:
         fba_avail, fba_working, fba_shipped, fba_receiving, fba_reserved = (
             _gen_fba_inventory(forecast_daily, target_fba_days)
         )
+        if listing_id in MOCK_RECENT_STOCKOUT_LISTING_IDS:
+            fba_shipped += fba_avail
+            fba_avail = 0
+
         local_actual, local_plan = _gen_local_inventory(
             forecast_daily, has_inbound=(risk in ("p1", "p2", "p3"))
         )

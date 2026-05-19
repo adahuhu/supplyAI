@@ -19,11 +19,13 @@ from scripts.seed_data.constants import (
     DEFAULT_LEAD_TIME,
     DEFAULT_RULE,
     LOGISTICS_METHODS,
+    RECENT_STOCKOUT_EVENT_ANCHOR,
     STORES,
     TODAY,
     WAREHOUSES,
 )
 from scripts.seed_data.generators import (
+    MOCK_RECENT_STOCKOUT_LISTING_IDS,
     SkuSeed,
     fx_rate_to_base,
 )
@@ -397,23 +399,24 @@ async def seed_mk_sku_inbound_detail(
 async def seed_mk_stockout_events(
     session: AsyncSession, skus: list[SkuSeed]
 ) -> None:
-    """断货事件 — 模拟近 7 天断货趋势(P1 SKU 部分曾断货)."""
+    """断货事件 — 模拟近 7 天 FBA 可用断货 SKU."""
     if not await _is_empty(session, MkStockoutEvent):
         logger.info("mk_stockout_event_skipped")
         return
 
     event_count = 0
-    p1_skus = [s for s in skus if s.risk_level == "p1"]
+    stockout_skus = [
+        s for s in skus if s.listing_id in MOCK_RECENT_STOCKOUT_LISTING_IDS
+    ]
 
-    # 选 60% 的 P1 SKU 模拟历史断货事件
-    for i, sku in enumerate(p1_skus):
-        if i % 5 == 0:  # 跳过部分,模拟 80% 命中
-            continue
-
-        # 历史断货:5-15 天前发生,持续 1-3 天后恢复
-        days_ago = 3 + (i % 12)
-        duration = 1 + (i % 3)
-        start_at = datetime.combine(TODAY - timedelta(days=days_ago), datetime.min.time())
+    for i, sku in enumerate(stockout_skus):
+        # 固定落在当前演示日期的近 7 天窗口内,用于列表“近 7 天断货”筛选。
+        days_ago = 3 + i
+        duration = 1 + (i % 2)
+        start_at = datetime.combine(
+            RECENT_STOCKOUT_EVENT_ANCHOR - timedelta(days=days_ago),
+            datetime.min.time(),
+        )
         end_at = start_at + timedelta(days=duration)
 
         session.add(

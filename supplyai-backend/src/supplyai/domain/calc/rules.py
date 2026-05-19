@@ -6,6 +6,7 @@ lead_time_days = purchase_duration + delivery + qc + max(logistics_days)
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 StockScopeItem = str
 
@@ -33,6 +34,7 @@ class ReplenishmentRule:
     enabled: bool
     logistics_days: tuple[int, ...] = ()
     stock_scope: tuple[StockScopeItem, ...] = DEFAULT_STOCK_SCOPE
+    updated_at: datetime | None = None
 
 
 @dataclass
@@ -48,6 +50,12 @@ _SCOPE_PRIORITY = {"sku": 3, "store": 2, "global": 1}
 
 DEFAULT_SAFETY_DAYS = 14
 DEFAULT_LEAD_TIME_DAYS = 20
+
+
+def _updated_at_rank(rule: ReplenishmentRule) -> float:
+    if rule.updated_at is None:
+        return 0.0
+    return rule.updated_at.timestamp()
 
 
 def normalize_stock_scope(value: object) -> tuple[StockScopeItem, ...]:
@@ -97,7 +105,13 @@ def resolve_rule(
             lead_time_days=DEFAULT_LEAD_TIME_DAYS,
             stock_scope=DEFAULT_STOCK_SCOPE,
         )
-    best = max(matched, key=lambda r: _SCOPE_PRIORITY.get(r.scope_type, 0))
+    best = max(
+        matched,
+        key=lambda r: (
+            _SCOPE_PRIORITY.get(r.scope_type, 0),
+            _updated_at_rank(r),
+        ),
+    )
     return ResolvedRule(
         rule_id=best.rule_id,
         scope_type=best.scope_type,

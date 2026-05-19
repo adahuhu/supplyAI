@@ -152,6 +152,14 @@ class RuleService:
         rule.updated_by = req.updated_by
 
         await self._repo.upsert(rule)
+        if rule.enabled:
+            await self._repo.disable_same_scope_except(
+                tenant_id=rule.tenant_id,
+                scope_type=rule.scope_type,
+                mall_id=rule.mall_id,
+                msku=rule.msku,
+                keep_rule_id=rule.rule_id,
+            )
         normalized_methods = _normalize_logistics_methods(req.logistics_methods)
         if normalized_methods is not None:
             await self._repo.replace_logistics_methods(rule.rule_id, normalized_methods)

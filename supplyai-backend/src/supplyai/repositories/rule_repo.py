@@ -145,3 +145,28 @@ class RuleRepository:
         self._session.add(rule)
         await self._session.flush()
         return rule
+
+    async def disable_same_scope_except(
+        self,
+        *,
+        tenant_id: int,
+        scope_type: str,
+        mall_id: int | None,
+        msku: str | None,
+        keep_rule_id: str,
+    ) -> None:
+        result = await self._session.execute(
+            select(MkReplenishmentRule).where(
+                *_scope_filters(
+                    tenant_id=tenant_id,
+                    scope_type=scope_type,
+                    mall_id=mall_id,
+                    msku=msku,
+                ),
+                MkReplenishmentRule.rule_id != keep_rule_id,
+                MkReplenishmentRule.enabled == 1,
+            )
+        )
+        for row in result.scalars().all():
+            row.enabled = 0
+        await self._session.flush()

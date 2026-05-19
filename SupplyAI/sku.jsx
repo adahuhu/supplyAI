@@ -524,7 +524,7 @@ function TooltipMetric({ color, label, value, unit, strongColor }) {
 }
 
 // ── V7 trend panel: sales + inventory + holiday bands ───────────────────────
-const TODAY_V7 = new Date('2026-05-04T00:00:00');
+const TODAY_V7 = new Date('2026-05-18T00:00:00');
 
 // 节日数据来自后端 /dashboard/holidays(挂在 window.HOLIDAYS_DATA)。
 // SKU 分析页允许维护自定义节日,并同步到全局大促提醒和趋势计算。
@@ -626,13 +626,26 @@ function fmtYMDV7(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function holidayBandLabelV7(h) {
+function holidayDisplayMultiplierV7(h, forecast, futDays) {
+  if (!h || h.isPointOverride) return Number(h?.mult || 1);
+  const from = Math.max(1, Number(h.fromAbs) || 1);
+  const to = Math.min(futDays, Number(h.toAbs) || futDays);
+  const values = [];
+  for (let absDay = from; absDay <= to; absDay++) {
+    const m = Number(forecast?.[absDay - 1]?.mult);
+    if (Number.isFinite(m) && m > 0) values.push(m);
+  }
+  if (!values.length) return Number(h.mult || 1);
+  return values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+function holidayDisplayLabelV7(h, forecast, futDays) {
   const nameMap = {
     'Mothers Day': '母亲节',
     "Mother's Day": '母亲节',
   };
   const name = nameMap[h?.name] || h?.name || '大促';
-  return `${name} x${Number(h?.mult || 1).toFixed(1)}`;
+  return `${name} x${holidayDisplayMultiplierV7(h, forecast, futDays).toFixed(1)}`;
 }
 
 function extendHistoryV7(histRaw, targetDays, seed0) {
@@ -663,7 +676,7 @@ function buildForecastV7(baseFutureDaily, futDays, holidays) {
   return result;
 }
 
-// 将 inboundList 转为 absDay(今天起第N天) → qty 的映射
+// 将 inboundList 转为 absDay(今天起第N天) → qty 的映射，供 buildInventoryV7 使用
 function buildInboundByDayV7(inboundList) {
   const map = {};
   if (!inboundList || !inboundList.length) return map;
@@ -673,14 +686,31 @@ function buildInboundByDayV7(inboundList) {
     const d = new Date(s.includes('T') ? s : s + 'T00:00:00');
     if (isNaN(d.getTime())) continue;
     const absDay = dateDiffV7(TODAY_V7, d);
-    if (absDay < 1) continue; // 已到货，计入当前库存
+    if (absDay < 1) continue;
     map[absDay] = (map[absDay] || 0) + b.qty;
   }
   return map;
 }
 
-function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, startInv, invOverrides, inboundByDay = {}) {
-  const demand = buildForecastV7(baseFutureDaily, futDays, holidays);
+function buildPersistedForecastV7(forecastSeries, futDays, holidays) {
+  const pointOverrides = (holidays || []).filter(h => h.isPointOverride);
+  return (forecastSeries || []).slice(0, futDays).map((p, i) => {
+    const persistedMult = Number(p.mult ?? p.sales_multiplier ?? 1) || 1;
+    let mult = persistedMult;
+    for (const h of pointOverrides) {
+      const absDay = i + 1;
+      if (absDay >= h.fromAbs && absDay <= h.toAbs) mult = h.mult;
+    }
+    const base = Math.max(0, Number(p.qty ?? p.value ?? 0) || 0) / Math.max(0.0001, persistedMult);
+    return { value: Math.max(0, Math.round(base * mult)), mult };
+  });
+}
+
+function buildStockConstrainedForecastV7(baseFutureDaily, futDays, holidays, startInv, invOverrides, forecastSeries) {
+  const persistedDemand = buildPersistedForecastV7(forecastSeries, futDays, holidays);
+  const demand = persistedDemand.length >= futDays
+    ? persistedDemand
+    : buildForecastV7(baseFutureDaily, futDays, holidays);
   const result = [];
   let inv = Math.max(0, Number(startInv) || 0);
   for (let i = 0; i < futDays; i++) {
@@ -727,8 +757,8 @@ function TrendPanelV7({ sku }) {
     [sku.id, JSON.stringify(sku.inboundList)]
   );
   const forecast = React.useMemo(
-    () => buildStockConstrainedForecastV7(sku.futureDaily, range.futDays, holidays, sku.totalStock, invOverrides, inboundByDay),
-    [sku.futureDaily, sku.totalStock, range.futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(inboundByDay)]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, range.futDays, holidays, sku.totalStock, invOverrides, sku.forecastSeries),
+    [sku.futureDaily, sku.totalStock, range.futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(sku.forecastSeries || [])]
   );
   const adjAvg = range.futDays > 0
     ? Math.round(forecast.reduce((sum, item) => sum + item.value, 0) / Math.max(1, forecast.length))
@@ -931,7 +961,7 @@ function TrendPanelV7({ sku }) {
         {visH.map(h => (
           <span key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: h.color, display: 'inline-block', opacity: .72 }}/>
-            {h.name} x{h.mult.toFixed(1)}
+            {holidayDisplayLabelV7(h, forecast, range.futDays)}
           </span>
         ))}
         {pointOvr.length > 0 && (
@@ -1245,8 +1275,8 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
     return extendHistoryV7(raw, histDays, sku.id.charCodeAt(0));
   }, [sku.id, histDays]);
   const forecast = React.useMemo(
-    () => buildStockConstrainedForecastV7(sku.futureDaily, futDays, holidays, sku.totalStock, invOverrides, inboundByDay),
-    [sku.futureDaily, sku.totalStock, futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(inboundByDay)]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, futDays, holidays, sku.totalStock, invOverrides, sku.forecastSeries),
+    [sku.futureDaily, sku.totalStock, futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(sku.forecastSeries || [])]
   );
   const futVals = forecast.map(f => f.value);
   const invSeries = React.useMemo(
@@ -1455,13 +1485,14 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
             const bw = Math.max(0, x2 - x1);
             if (bw < 2) return null;
             const isPoint = h.isPointOverride;
-            const bandLabel = isPoint ? `x${h.mult.toFixed(1)}` : holidayBandLabelV7(h);
+            const displayMult = holidayDisplayMultiplierV7(h, forecast, futDays);
+            const bandLabel = isPoint ? `x${h.mult.toFixed(1)}` : holidayDisplayLabelV7(h, forecast, futDays);
             const labelW = Math.min(132, Math.max(44, bandLabel.length * 6.2 + 10));
             const labelX = Math.max(PAD.l + 2, Math.min(x1 + 1, PAD.l + cW - labelW - 2));
             return (
               <g key={h.id}>
                 <rect x={x1} y={PAD.t} width={bw} height={cH}
-                  fill={h.color + (h.mult >= 1 ? '18' : '14')}
+                  fill={h.color + (displayMult >= 1 ? '18' : '14')}
                   style={{ cursor: isPoint ? 'default' : 'grab' }}
                   onPointerDown={isPoint ? undefined : e => startDrag(e, 'band', h.id, h.fromAbs, h.toAbs)}
                 />

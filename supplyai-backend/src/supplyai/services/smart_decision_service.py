@@ -20,6 +20,7 @@ from supplyai.services.ai_service import AiService
 logger = logging.getLogger(__name__)
 
 SCENARIO_PATTERNS: dict[str, re.Pattern] = {
+    "sales_leaders": re.compile(r"销量.*(最好|最高|领先|Top|排行)|卖得.*(最好|最多)|重点推|主推|爆款|热卖|畅销|销售冠军"),
     "single_sku_replenishment": re.compile(r"挑一个|单个SKU|还能卖多久|要不要补"),
     "risk_queue": re.compile(r"高风险|必须补货|紧急度|风险队列|优先级"),
     "holiday_readiness": re.compile(r"大促|节日|Prime|活动备货|母亲节|黑五|圣诞"),
@@ -29,8 +30,9 @@ SCENARIO_PATTERNS: dict[str, re.Pattern] = {
 
 CLASSIFY_SYSTEM_PROMPT = (
     "你是意图分类器。根据用户消息和对话上下文，判断属于以下哪个场景。只返回场景名，不解释。\n"
-    "- risk_queue: 查看风险SKU、补货优先级、断货排序\n"
-    "- holiday_readiness: 大促备货、节日缺口、活动准备\n"
+"- risk_queue: 查看风险SKU、补货优先级、断货排序\n"
+"- sales_leaders: 查看销量最好的产品、热卖SKU、重点推广SKU\n"
+"- holiday_readiness: 大促备货、节日缺口、活动准备\n"
     "- plan_comparison: 运输方案比较、海运空运对比、物流成本\n"
     "- rule_impact: 规则参数调整影响、安全天数变化\n"
     "- single_sku_replenishment: 单个SKU补货建议\n"
@@ -41,6 +43,7 @@ CLASSIFY_SYSTEM_PROMPT = (
 
 VALID_SCENARIOS: set[str] = {
     "risk_queue",
+    "sales_leaders",
     "holiday_readiness",
     "plan_comparison",
     "rule_impact",
@@ -56,6 +59,25 @@ CARD_EXPLAIN_PROMPT = (
 )
 
 LLM_CLASSIFY_TIMEOUT = 3.0
+
+
+def _extract_rule_impact_context(text: str) -> dict[str, Any]:
+    """从本轮问题提取规则模拟参数,优先覆盖默认示例值."""
+    if not text:
+        return {}
+
+    patterns = [
+        r"(?:安全天数|安全库存天数|安全库存|safe\s*days?).{0,12}?(?:改成|调整到|调到|设为|设置为|提高到|降到|变成)?\s*(\d{1,3})\s*天?",
+        r"(?:改成|调整到|调到|设为|设置为|提高到|降到|变成)\s*(\d{1,3})\s*天",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = int(match.group(1))
+        if 0 <= value <= 180:
+            return {"target_safety_days": value}
+    return {}
 
 
 class SmartDecisionService:
@@ -135,6 +157,16 @@ class SmartDecisionService:
                 f"Top SKU: {rows_desc}"
             )
 
+        if card_type == "sales_leaders":
+            rows_desc = "; ".join(
+                f'{r["msku"]}(近7天{r.get("sales7d",0)}件, 预测日销{r.get("futureDaily","?")}, {r.get("recommendation","")})'
+                for r in card.get("rows", [])[:6]
+            )
+            return (
+                f'销量领先 SKU · {card.get("title","")}: '
+                f'{card.get("summary","")} 推荐SKU: {rows_desc}'
+            )
+
         if card_type == "holiday_readiness":
             metrics = {m["label"]: m.get("value", "") for m in card.get("metrics", [])}
             rows_desc = "; ".join(
@@ -182,6 +214,8 @@ class SmartDecisionService:
             yield {"type": "classify", "scenario": scenario, "method": method}
 
             ctx = dict(req.context) if req.context else {}
+            if scenario == "rule_impact":
+                ctx.update(_extract_rule_impact_context(text))
             try:
                 card_resp = await self._ai_service.decision_card(
                     DecisionCardRequest(
@@ -204,6 +238,10 @@ class SmartDecisionService:
                 "card": card_resp.card,
                 "summary": summary,
             }
+
+            if scenario == "sales_leaders":
+                yield {"type": "done", "finish_reason": "stop", "scenario": scenario}
+                return
 
             if settings.card_explain:
                 try:

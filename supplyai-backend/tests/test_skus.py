@@ -59,6 +59,7 @@ async def test_skus_list_filter_by_recent_stockout(client: AsyncClient) -> None:
     data = response.json()
     assert data["total"] == 3
     assert all(r["stockout_recent_7"] is True for r in data["rows"])
+    assert all(r["fba_available"] == 0 for r in data["rows"])
 
 
 async def test_skus_list_filter_by_mall(client: AsyncClient) -> None:
@@ -131,6 +132,18 @@ async def test_skus_list_has_varied_mock_tags(client: AsyncClient) -> None:
     tags = {tag for row in rows for tag in row["tags"]}
     assert len(label_sets) >= 8
     assert {"清仓", "爆款", "新品", "大促", "低库存"}.issubset(tags)
+
+
+async def test_skus_list_filter_by_tags(client: AsyncClient) -> None:
+    """备货列表支持按标签精确筛选."""
+    response = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "tags": ["清仓"], "page_size": 50},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] > 0
+    assert all("清仓" in row["tags"] for row in data["rows"])
 
 
 async def test_skus_list_keyword_matches_fnsku(client: AsyncClient) -> None:

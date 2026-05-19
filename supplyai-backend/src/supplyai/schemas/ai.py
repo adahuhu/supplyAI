@@ -45,6 +45,7 @@ class ChatResponseMessage(BaseModel):
 
 DecisionScenario = Literal[
     "risk_queue",
+    "sales_leaders",
     "holiday_readiness",
     "plan_comparison",
     "rule_impact",

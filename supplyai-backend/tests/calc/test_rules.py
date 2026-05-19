@@ -1,6 +1,8 @@
 """Rule Resolver 单元测试 — 命中三层作用范围."""
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from supplyai.domain.calc.rules import (
@@ -19,6 +21,7 @@ def _rule(
     safety_days: int = 14,
     delivery_days: int = 20,
     enabled: bool = True,
+    updated_at: datetime | None = None,
 ) -> ReplenishmentRule:
     return ReplenishmentRule(
         rule_id=rule_id,
@@ -30,6 +33,7 @@ def _rule(
         delivery_days=delivery_days,
         qc_days=0,
         enabled=enabled,
+        updated_at=updated_at,
     )
 
 
@@ -144,3 +148,30 @@ def test_resolve_rule_normalizes_stock_scope() -> None:
     )
     out = resolve_rule(rules=[rule], mall_id=1001, msku="MSKU-X")
     assert out.stock_scope == ("fba_available", "local_actual")
+
+
+def test_resolve_same_scope_uses_latest_rule() -> None:
+    """同一 SKU+店铺存在历史重复规则时,计算必须取最新规则."""
+    rules = [
+        _rule(
+            "r-old",
+            "sku",
+            mall_id=1001,
+            msku="MSKU-X",
+            safety_days=7,
+            updated_at=datetime(2026, 5, 1, 9, 0, 0),
+        ),
+        _rule(
+            "r-new",
+            "sku",
+            mall_id=1001,
+            msku="MSKU-X",
+            safety_days=21,
+            updated_at=datetime(2026, 5, 2, 9, 0, 0),
+        ),
+    ]
+
+    out = resolve_rule(rules=rules, mall_id=1001, msku="MSKU-X")
+
+    assert out.rule_id == "r-new"
+    assert out.safety_days == 21

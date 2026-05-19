@@ -6,9 +6,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from supplyai.domain.ai.client import ChatResponse
+from supplyai.domain.ai.client import ChatMessage, ChatResponse
 from supplyai.schemas.ai import ChatRequestMessage, SmartDecisionRequest
-from supplyai.services.smart_decision_service import SmartDecisionService
+from supplyai.services.smart_decision_service import (
+    SmartDecisionService,
+    _extract_rule_impact_context,
+)
 
 TENANT = 100228
 
@@ -29,6 +32,12 @@ class TestClassify:
         assert scenario == "risk_queue"
         assert method == "regex"
 
+    def test_regex_hits_sales_leaders(self):
+        svc = SmartDecisionService.__new__(SmartDecisionService)
+        scenario, method = svc._classify_regex("我哪些产品的销量最好，应该重点推哪些SKU呢")
+        assert scenario == "sales_leaders"
+        assert method == "regex"
+
     def test_regex_hits_holiday(self):
         svc = SmartDecisionService.__new__(SmartDecisionService)
         scenario, method = svc._classify_regex("大促要备哪些货")
@@ -46,6 +55,14 @@ class TestClassify:
         scenario, method = svc._classify_regex("安全天数改成21天")
         assert scenario == "rule_impact"
         assert method == "regex"
+
+    def test_extract_rule_impact_target_days_from_followup(self):
+        assert _extract_rule_impact_context("安全天数再改成15天呢") == {
+            "target_safety_days": 15
+        }
+        assert _extract_rule_impact_context("调到18天看看") == {
+            "target_safety_days": 18
+        }
 
     def test_regex_hits_single_sku(self):
         svc = SmartDecisionService.__new__(SmartDecisionService)
@@ -158,6 +175,82 @@ class TestStream:
         types = [e["type"] for e in events]
         assert "delta" in types
         assert "done" in types
+
+    @pytest.mark.asyncio
+    async def test_sales_leaders_returns_sku_recommendations(self, client, monkeypatch):
+        monkeypatch.setattr("supplyai.services.smart_decision_service.settings.card_explain", False)
+        req = _make_req("我哪些产品的销量最好，应该重点推哪些SKU呢")
+        resp = await client.post(
+            "/api/supplyai/ai/smart-decision/stream",
+            json=req.model_dump(),
+        )
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        classify_ev = next(e for e in events if e["type"] == "classify")
+        assert classify_ev["scenario"] == "sales_leaders"
+        card_ev = next(e for e in events if e["type"] == "card")
+        card = card_ev["card"]
+        assert card["type"] == "sales_leaders"
+        assert card["rows"]
+        first = card["rows"][0]
+        assert first["msku"]
+        assert first["sales7d"] >= 0
+        assert first["reasons"]
+        assert first["recommendation"]
+
+    @pytest.mark.asyncio
+    async def test_rule_impact_uses_target_days_from_user_text(self, client, monkeypatch):
+        monkeypatch.setattr("supplyai.services.smart_decision_service.settings.card_explain", False)
+        req = _make_req("安全天数再改成15天呢")
+        resp = await client.post(
+            "/api/supplyai/ai/smart-decision/stream",
+            json=req.model_dump(),
+        )
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        card_ev = next(e for e in events if e["type"] == "card")
+        card = card_ev["card"]
+        assert card["type"] == "rule_impact"
+        assert card["targetSafeDays"] == 15
+        assert card["rows"]
+        assert all(row["targetSafeDays"] == 15 for row in card["rows"])
+
+    @pytest.mark.asyncio
+    async def test_sku_followup_ai_503_uses_local_snapshot_fallback(self, client, monkeypatch):
+        """外部模型 503 时,SKU 页追问应返回本地快照结论,不能把原始报错透给用户."""
+
+        class BrokenAiClient:
+            async def chat(self, messages: list[ChatMessage], **kwargs):  # noqa: ANN003
+                raise RuntimeError("503 Service Unavailable")
+
+            async def chat_stream(self, messages: list[ChatMessage], **kwargs):  # noqa: ANN003
+                raise RuntimeError("503 Service Unavailable")
+                yield  # pragma: no cover
+
+        import supplyai.api.v1.ai as ai_api
+
+        monkeypatch.setattr(ai_api, "get_ai_client", lambda: BrokenAiClient())
+        req = SmartDecisionRequest(
+            tenant_id=TENANT,
+            messages=[ChatRequestMessage(role="user", content="这个SKU下次备货是什么时候")],
+            context={
+                "current_page": "sku",
+                "sku": {"listing_id": 1000003, "msku": "MS40619"},
+            },
+        )
+        resp = await client.post(
+            "/api/supplyai/ai/smart-decision/stream",
+            json=req.model_dump(),
+        )
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        assert not [e for e in events if e["type"] == "error"]
+        full_text = "".join(e.get("text", "") for e in events if e["type"] == "delta")
+        assert "503" not in full_text
+        assert "建议采购" in full_text
+        assert "FBA 可售" in full_text
+        done = next(e for e in events if e["type"] == "done")
+        assert done.get("status") == "degraded"
 
 
 def _parse_sse(text: str) -> list[dict]:

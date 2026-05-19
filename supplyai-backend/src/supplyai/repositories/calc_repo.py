@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from supplyai.models.mk import (
     MkCalcRun,
+    MkHoliday,
     MkListingProductSources,
     MkReplenishmentRule,
     MkRuleLogisticsMethod,
@@ -102,6 +103,14 @@ class CalcRepository:
                 MkReplenishmentRule.tenant_id == tenant_id,
                 MkReplenishmentRule.enabled == 1,
             )
+        )
+        return list(result.scalars().all())
+
+    async def list_holidays(self, tenant_id: int) -> list[MkHoliday]:
+        result = await self._session.execute(
+            select(MkHoliday)
+            .where(MkHoliday.tenant_id == tenant_id, MkHoliday.enabled == 1)
+            .order_by(MkHoliday.peak_date.asc())
         )
         return list(result.scalars().all())
 

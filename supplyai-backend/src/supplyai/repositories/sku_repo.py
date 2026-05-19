@@ -32,6 +32,7 @@ class SkuRepository:
         priorities: list[str] | None = None,
         mall_ids: list[int] | None = None,
         country_codes: list[str] | None = None,
+        tags: list[str] | None = None,
         keyword: str | None = None,
         suggest_only: bool = False,
         stockout_within_days: int | None = None,
@@ -57,6 +58,22 @@ class SkuRepository:
             base_filters.append(stat.mall_id.in_(mall_ids))
         if country_codes:
             base_filters.append(stat.country_code.in_(country_codes))
+        if tags:
+            tag_filters = []
+            for tag in tags:
+                clean_tag = (tag or "").strip()
+                if not clean_tag:
+                    continue
+                tag_filters.append(
+                    or_(
+                        stat.label_ids == clean_tag,
+                        stat.label_ids.ilike(f"{clean_tag},%"),
+                        stat.label_ids.ilike(f"%,{clean_tag},%"),
+                        stat.label_ids.ilike(f"%,{clean_tag}"),
+                    )
+                )
+            if tag_filters:
+                base_filters.append(or_(*tag_filters))
         if keyword:
             kw = f"%{keyword}%"
             base_filters.append(
