@@ -646,6 +646,79 @@ function RiskQueueCard({ card, setRoute, openCreatePO, onClose }) {
   );
 }
 
+function SalesLeadersCard({ card, setRoute, openCreatePO, onClose }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12.5 }}>
+      <div style={{
+        padding: '13px 14px',
+        border: '1px solid rgba(52,211,153,.26)',
+        borderLeft: '3px solid var(--p3)',
+        borderRadius: 'var(--r-md)',
+        background: 'linear-gradient(180deg, rgba(52,211,153,.12), rgba(52,211,153,.035))',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <Icon name="arrow-up" size={14} color="var(--p3-strong)"/>
+          <span style={{ fontWeight: 700 }}>{card.title}</span>
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)', lineHeight: 1.45 }}>优先推热卖且库存可支撑的 SKU</div>
+        <div style={{ color: 'var(--text-3)', lineHeight: 1.55, marginTop: 5 }}>{card.summary}</div>
+      </div>
+      <MetricGrid items={card.metrics}/>
+      <EvidenceGrid items={card.evidence}/>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', background: 'var(--surface)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 74px 74px 88px', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', color: 'var(--text-3)', fontSize: 11 }}>
+          <div>SKU</div>
+          <div style={{ textAlign: 'right' }}>近7天</div>
+          <div style={{ textAlign: 'right' }}>预测日销</div>
+          <div style={{ textAlign: 'right' }}>FBA可售</div>
+          <div>建议</div>
+        </div>
+        {(card.rows || []).map((s) => (
+          <button key={s.id} onClick={() => setRoute && setRoute({ page: 'sku', skuId: s.id })} style={{
+            width: '100%',
+            border: 0,
+            borderBottom: '1px solid var(--border)',
+            background: 'transparent',
+            color: 'inherit',
+            cursor: 'pointer',
+            display: 'grid',
+            gridTemplateColumns: '1fr 70px 74px 74px 88px',
+            gap: 8,
+            alignItems: 'center',
+            padding: '10px',
+            textAlign: 'left',
+            fontFamily: 'inherit',
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="mono" style={{ fontSize: 12, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {s.msku}<PriorityBadge level={s.priority} compact/>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name || s.sku}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {(s.reasons || []).slice(0, 2).join(' · ')}
+              </div>
+            </div>
+            <div className="tabular" style={{ textAlign: 'right', fontWeight: 700 }}>{adviceFormatNum(s.sales7d)}</div>
+            <div className="tabular" style={{ textAlign: 'right' }}>{adviceFormatFlexible(s.futureDaily)}</div>
+            <div className="tabular" style={{ textAlign: 'right', color: Number(s.fbaSellable || 0) < 7 ? 'var(--p1)' : 'inherit' }}>{adviceFormatFlexible(s.fbaSellable)} 天</div>
+            <div style={{ color: s.recommendation === '优先加码' || s.recommendation === '重点推广' ? 'var(--p3)' : 'var(--p2)', fontWeight: 650 }}>{s.recommendation}</div>
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <button className="btn sm" onClick={() => {
+          if (setRoute) setRoute({ page: 'list' });
+          if (onClose) onClose();
+        }}>查看备货列表</button>
+        <button className="btn primary sm" onClick={() => {
+          if (openCreatePO) openCreatePO(card.actionItems);
+          if (onClose) onClose();
+        }} disabled={!card.actionItems?.length}>给需补货 SKU 建计划</button>
+      </div>
+    </div>
+  );
+}
+
 function HolidayReadinessCard({ card, setRoute, openCreatePO, onClose }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12.5 }}>
@@ -932,6 +1005,7 @@ function StructuredAICard({ card, text, sku, setRoute, openCreatePO, openRules, 
     );
   }
   if (built?.type === 'risk_queue') return <RiskQueueCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
+  if (built?.type === 'sales_leaders') return <SalesLeadersCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
   if (built?.type === 'holiday_readiness') return <HolidayReadinessCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
   if (built?.type === 'plan_comparison') return <PlanComparisonCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
   if (built?.type === 'rule_impact') return <RuleImpactCard card={built} setRoute={setRoute} openRules={openRules} onClose={onClose} refreshData={refreshData} showToast={showToast}/>;
@@ -1013,6 +1087,7 @@ function AIInput({ placeholder = '问我：今天哪些 SKU 必须补货？', on
 // 场景名 → 中文标签(用于 classify 事件占位)
 const SCENARIO_LABEL = {
   risk_queue: '高风险队列',
+  sales_leaders: '销量主推',
   holiday_readiness: '大促备货',
   plan_comparison: '方案对比',
   rule_impact: '规则影响',

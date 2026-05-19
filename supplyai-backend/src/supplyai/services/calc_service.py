@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -23,6 +24,7 @@ from supplyai.domain.calc.stock import aggregate_stock, participating_stock, sel
 from supplyai.domain.calc.suggest import SuggestInput, compute_suggest
 from supplyai.models.mk import (
     MkCalcRun,
+    MkHoliday,
     MkListingProductSources,
     MkReplenishmentRule,
     MkSkuForecastDaily,
@@ -37,6 +39,8 @@ logger = logging.getLogger(__name__)
 RunType = Literal["scheduled", "rule_changed", "manual"]
 HISTORY_DAYS = 90
 HORIZON_DAYS = 45
+MIN_HOLIDAY_MULTIPLIER = 0.3
+MAX_HOLIDAY_MULTIPLIER = 4.0
 
 
 class NoListingsException(BusinessException):
@@ -117,6 +121,7 @@ class CalcService:
             [r.rule_id for r in orm_rules]
         )
         rules = self._to_rule_dataclasses(orm_rules, logistics_by_rule)
+        holidays = await self._repo.list_holidays(tenant_id)
 
         snapshots: list[MkSupplySkuDailyStat] = []
         forecasts: list[MkSkuForecastDaily] = []
@@ -130,6 +135,7 @@ class CalcService:
                 local_inv=local_inv,
                 sales_map=sales_map,
                 rules=rules,
+                holidays=holidays,
             )
             snapshots.append(snap)
             forecasts.extend(fc_rows)
@@ -158,6 +164,7 @@ class CalcService:
                 stock_scope=normalize_stock_scope(
                     r.stock_scope_json or DEFAULT_STOCK_SCOPE
                 ),
+                updated_at=r.updated_at,
             )
             for r in orm_rules
         ]
@@ -172,6 +179,7 @@ class CalcService:
         local_inv: dict[tuple[int | None, str], int],
         sales_map: dict[tuple[int | None, str], list[RlAmzSalesDailyReport]],
         rules: list[ReplenishmentRule],
+        holidays: list[MkHoliday],
     ) -> tuple[MkSupplySkuDailyStat, list[MkSkuForecastDaily]]:
         key = (lp.mall_id, lp.msku)
 
@@ -181,11 +189,19 @@ class CalcService:
         # 2. 销量历史 + 预测
         history_rows = sales_map.get(key, [])
         history = [r.sales_volume or 0 for r in history_rows]
+        holiday_multipliers = build_holiday_multipliers(
+            history_rows=history_rows,
+            holidays=holidays,
+            country_code=lp.country_code,
+            today=today,
+            horizon_days=HORIZON_DAYS,
+        )
         fc = compute_forecast(
             ForecastInput(
                 history=history,
                 today=today,
                 horizon_days=HORIZON_DAYS,
+                seasonal_multipliers=holiday_multipliers,
             )
         )
 
@@ -249,6 +265,7 @@ class CalcService:
             sku=lp.sku,
             asin=lp.asin,
             product_name=lp.product_name,
+            label_ids=lp.label_ids,
             listing_status=lp.listing_status,
             delivery_method=lp.delivery_method,
             risk_level=priority,
@@ -308,10 +325,170 @@ class CalcService:
                 day_offset=p.day_offset,
                 forecast_qty=Decimal(str(round(p.forecast_qty, 2))),
                 forecast_source=fc.forecast_source,
-                sales_multiplier=Decimal("1"),
+                sales_multiplier=Decimal(str(round(p.sales_multiplier, 4))),
                 is_adjusted=0,
                 source_type="derived",
             )
             for p in fc.series
         ]
         return snap, forecast_rows
+
+
+def build_holiday_multipliers(
+    *,
+    history_rows: list[RlAmzSalesDailyReport],
+    holidays: list[MkHoliday],
+    country_code: str | None,
+    today: date,
+    horizon_days: int,
+) -> list[float] | None:
+    """Build daily forecast multipliers from holiday windows.
+
+    Historical closed holiday windows are converted into SKU-level observed
+    coefficients. Future/current windows first reuse matching historical
+    coefficients, then fall back to the configured holiday coefficient.
+    """
+    relevant_holidays = [
+        h for h in holidays if _holiday_matches_country(h, country_code)
+    ]
+    if not relevant_holidays:
+        return None
+
+    history_by_date = _history_sales_by_date(history_rows)
+    historical_by_key = _historical_holiday_coefficients(
+        history_by_date=history_by_date,
+        holidays=relevant_holidays,
+        today=today,
+    )
+    fallback_coeff = _average(
+        coeff for values in historical_by_key.values() for coeff in values
+    )
+
+    multipliers: list[float] = []
+    has_effect = False
+    for i in range(horizon_days):
+        forecast_date = today + timedelta(days=i)
+        daily_multiplier = 1.0
+        for holiday in relevant_holidays:
+            start, end = _holiday_window(holiday)
+            if start <= forecast_date <= end:
+                configured = _clamped_multiplier(float(holiday.sales_multiplier or 1))
+                observed = _average(historical_by_key.get(_holiday_key(holiday), []))
+                effective = observed if observed is not None else fallback_coeff
+                daily_multiplier *= _clamped_multiplier(
+                    effective if effective is not None else configured
+                )
+        if abs(daily_multiplier - 1.0) >= 0.001:
+            has_effect = True
+        multipliers.append(round(daily_multiplier, 4))
+
+    return multipliers if has_effect else None
+
+
+def _historical_holiday_coefficients(
+    *,
+    history_by_date: dict[date, int],
+    holidays: list[MkHoliday],
+    today: date,
+) -> dict[str, list[float]]:
+    coefficients: dict[str, list[float]] = {}
+    if not history_by_date:
+        return coefficients
+
+    for holiday in holidays:
+        start, end = _holiday_window(holiday)
+        if end >= today:
+            continue
+        in_window = [
+            qty
+            for day, qty in history_by_date.items()
+            if start <= day <= end
+        ]
+        if not in_window:
+            continue
+
+        baseline_start = start - timedelta(days=max(14, holiday.days_before + 7))
+        baseline_end = start - timedelta(days=1)
+        baseline = [
+            qty
+            for day, qty in history_by_date.items()
+            if baseline_start <= day <= baseline_end
+        ]
+        if len(baseline) < 3:
+            baseline = [
+                qty
+                for day, qty in history_by_date.items()
+                if day < start or day > end
+            ]
+        base_avg = _average(baseline)
+        holiday_avg = _average(in_window)
+        if not base_avg or holiday_avg is None:
+            continue
+
+        coeff = _clamped_multiplier(holiday_avg / base_avg)
+        if coeff > 0:
+            coefficients.setdefault(_holiday_key(holiday), []).append(coeff)
+
+    return coefficients
+
+
+def _history_sales_by_date(rows: list[RlAmzSalesDailyReport]) -> dict[date, int]:
+    out: dict[date, int] = {}
+    for row in rows:
+        if not row.year_month_day:
+            continue
+        try:
+            day = date.fromisoformat(row.year_month_day[:10])
+        except ValueError:
+            continue
+        out[day] = out.get(day, 0) + int(row.sales_volume or 0)
+    return out
+
+
+def _holiday_window(holiday: MkHoliday) -> tuple[date, date]:
+    start = holiday.peak_date - timedelta(days=max(0, int(holiday.days_before or 0)))
+    end = holiday.peak_date + timedelta(days=max(0, int(holiday.days_after or 0)))
+    return start, end
+
+
+def _holiday_matches_country(holiday: MkHoliday, country_code: str | None) -> bool:
+    if not holiday.country_code or not country_code:
+        return True
+    return holiday.country_code.upper() == country_code.upper()
+
+
+def _holiday_key(holiday: MkHoliday) -> str:
+    text = f"{holiday.holiday_id or ''} {holiday.name or ''}".lower()
+    aliases = {
+        "mother": "mothers_day",
+        "mothers": "mothers_day",
+        "母亲": "mothers_day",
+        "memorial": "memorial_day",
+        "阵亡": "memorial_day",
+        "prime": "prime_day",
+        "black": "black_friday",
+        "黑五": "black_friday",
+        "christmas": "christmas",
+        "圣诞": "christmas",
+        "new year": "new_year",
+        "春节": "spring_festival",
+    }
+    for needle, key in aliases.items():
+        if needle in text:
+            return key
+    normalized = re.sub(r"\d{4}|[^a-z\u4e00-\u9fa5]+", " ", text)
+    words = [w for w in normalized.split() if w]
+    return "_".join(words[:3]) or "holiday"
+
+
+def _average(values) -> float | None:
+    nums = [float(v) for v in values if v is not None]
+    if not nums:
+        return None
+    return sum(nums) / len(nums)
+
+
+def _clamped_multiplier(value: float) -> float:
+    if value <= 0:
+        return 1.0
+    return max(MIN_HOLIDAY_MULTIPLIER, min(MAX_HOLIDAY_MULTIPLIER, value))

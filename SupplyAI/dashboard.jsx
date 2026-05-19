@@ -195,9 +195,9 @@ function HeroSummary({ setRoute }) {
         <button
           className="btn ghost sm"
           style={{ color: 'var(--accent-text)' }}
-          onClick={() => setRoute({ page: 'list', filter: 'p1' })}>
+          onClick={() => setRoute({ page: 'list', filter: 'suggest' })}>
 
-          查看高风险队列 →
+          查看建议采购 →
         </button>
       </div>
     </section>);
@@ -752,8 +752,9 @@ function Filter({ label, options, selectedValue, onChange, value }) {
   }, [open]);
 
   const selected = safeOptions.find((o) => o.value === selectedValue);
-  const totalCount = safeOptions.reduce((s, o) => s + (o.count || 0), 0);
-  const valueText = selected ? selected.label : `全部 (${safeOptions.length})`;
+  const valueText = selected
+    ? `${selected.label}${selected.count != null ? ` (${selected.count})` : ''}`
+    : '全部';
 
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
@@ -796,11 +797,21 @@ function Filter({ label, options, selectedValue, onChange, value }) {
                   fontWeight: active ? 600 : 400,
                   borderRadius: 4,
                   background: active ? 'var(--accent-soft)' : 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 10,
                 }}
                 onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--surface-hover)'; }}
                 onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
               >
-                {o.label}
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
+                {o.count != null && (
+                  <span className="tabular" style={{
+                    fontSize: 11,
+                    color: active ? 'var(--accent-text)' : 'var(--text-4)',
+                    background: active ? 'transparent' : 'var(--surface-hover)',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                  }}>{o.count}</span>
+                )}
               </div>
             );
           })}

@@ -5,6 +5,7 @@ from datetime import date
 
 # ===== 时间 =====
 TODAY = date(2026, 5, 9)
+RECENT_STOCKOUT_EVENT_ANCHOR = date(2026, 5, 18)
 SEED = 42
 
 # ===== 店铺(6 个,与前端 mock 对齐) =====

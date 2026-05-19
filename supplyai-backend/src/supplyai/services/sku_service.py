@@ -204,6 +204,7 @@ class SkuService:
             priorities=req.priorities,
             mall_ids=req.mall_ids,
             country_codes=req.country_codes,
+            tags=req.tags,
             keyword=req.keyword,
             suggest_only=req.suggest_only,
             stockout_within_days=req.stockout_within_days,
@@ -305,6 +306,7 @@ class SkuService:
                 date=fc.forecast_date,
                 qty=float(fc.forecast_qty),
                 source=fc.forecast_source,
+                sales_multiplier=float(fc.sales_multiplier or 1),
                 is_adjusted=bool(fc.is_adjusted),
             )
             for fc in forecast_rows
@@ -369,7 +371,11 @@ class SkuService:
             msku=stat.msku,
         )
         forecast = [
-            TrendPoint(date=fc.forecast_date, qty=float(fc.forecast_qty))
+            TrendPoint(
+                date=fc.forecast_date,
+                qty=float(fc.forecast_qty),
+                sales_multiplier=float(fc.sales_multiplier or 1),
+            )
             for fc in forecast_rows
         ]
         overrides = await self._sku_repo.list_inventory_overrides(

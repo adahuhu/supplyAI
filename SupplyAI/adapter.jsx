@@ -298,7 +298,7 @@
         date: toDate(p.date), qty: p.qty,
       })),
       forecast: (trendsResp.forecast || []).map(p => ({
-        date: toDate(p.date), qty: p.qty,
+        date: toDate(p.date), qty: p.qty, mult: p.sales_multiplier ?? p.mult ?? 1,
       })),
     };
   }
@@ -308,6 +308,11 @@
   function mergeTrendsIntoSku(sku, trendsResp, detailResp) {
     const history = (trendsResp.history || []).map(p => Math.round(p.qty || 0));
     const forecast = (trendsResp.forecast || []).map(p => Math.round(p.qty || 0));
+    const forecastSeries = (trendsResp.forecast || []).map(p => ({
+      date: p.date,
+      qty: Math.round(p.qty || 0),
+      mult: Number(p.sales_multiplier ?? p.mult ?? 1) || 1,
+    }));
     const inventoryOverrides = {};
     (trendsResp.inventory_overrides || []).forEach(row => {
       const day = Number(row.day_offset);
@@ -328,6 +333,7 @@
       last7Denoised: +(last7Daily * 0.94).toFixed(1),
       future14: forecast.slice(0, 14),
       future30: forecast.slice(0, 30),
+      forecastSeries,
       forecastDates: (trendsResp.forecast || []).map(p => p.date),
       inventoryOverrides,
     };

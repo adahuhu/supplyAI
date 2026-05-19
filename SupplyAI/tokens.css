@@ -458,7 +458,7 @@ table.t tfoot td {
   white-space: nowrap;
 }
 table.t tbody tr:hover td { background: color-mix(in srgb, var(--surface-hover) 76%, transparent); }
-table.t tbody tr.selected td { background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
+table.t tbody tr.selected td { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
 table.t .num { font-variant-numeric: tabular-nums; text-align: right; font-feature-settings: var(--feat-num); }
 
 /* Scroll x table wrap */

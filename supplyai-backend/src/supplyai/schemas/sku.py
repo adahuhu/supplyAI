@@ -22,6 +22,7 @@ class SkuListRequest(BaseModel):
     priorities: list[Priority] | None = None
     mall_ids: list[int] | None = None
     country_codes: list[str] | None = None
+    tags: list[str] | None = None
     keyword: str | None = None  # 模糊搜索 msku/sku/asin/product_name
     suggest_only: bool = False  # 仅显示建议采购
     stockout_within_days: int | None = None  # 7 天内断货
@@ -134,6 +135,7 @@ class ForecastTrendPoint(BaseModel):
     date: date
     qty: float
     source: str | None = None
+    sales_multiplier: float = 1.0
     is_adjusted: bool = False
 
 
@@ -200,6 +202,7 @@ class InventoryOverrideDTO(BaseModel):
 class TrendPoint(BaseModel):
     date: date
     qty: float
+    sales_multiplier: float = 1.0
 
 
 class SkuTrendsDTO(BaseModel):

@@ -21,6 +21,7 @@ class ForecastSeriesPoint:
     forecast_date: date
     day_offset: int
     forecast_qty: float
+    sales_multiplier: float = 1.0
 
 
 @dataclass
@@ -66,6 +67,7 @@ def project_series(
                 forecast_date=start_date + timedelta(days=i),
                 day_offset=i,
                 forecast_qty=qty,
+                sales_multiplier=m,
             )
         )
     return points

@@ -74,6 +74,50 @@ def _sku_card_row(s: SkuSummaryDTO) -> dict:
     }
 
 
+def _sales_leader_row(s: SkuSummaryDTO, score: float) -> dict:
+    sales_7d = int(s.sales_7d or 0)
+    future_daily = float(s.future_daily or 0)
+    fba_days = float(s.fba_sellable_days or 0)
+    margin = float(s.gross_margin or 0)
+    suggest_qty = int(s.suggest_qty or 0)
+    risks: list[str] = []
+    if fba_days < 7:
+        risks.append(f"FBA 可售仅 {fba_days:.2f} 天")
+    if suggest_qty > 0:
+        risks.append(f"需补 {suggest_qty} 件")
+    if margin < 0:
+        risks.append("毛利为负")
+    if not risks:
+        risks.append("库存可支撑继续放量")
+
+    recommendation = "重点推广"
+    if fba_days < 7:
+        recommendation = "先补货再推广"
+    elif margin < 0:
+        recommendation = "谨慎推广,先复核成本"
+    elif sales_7d >= 100 and future_daily >= 10:
+        recommendation = "优先加码"
+
+    row = _sku_card_row(s)
+    row.update(
+        {
+            "sales7d": sales_7d,
+            "yesterdaySales": s.yesterday_sales,
+            "futureDaily": round(future_daily, 2),
+            "grossMargin": round(margin * 100, 2) if margin else None,
+            "score": round(score, 2),
+            "recommendation": recommendation,
+            "reasons": [
+                f"近 7 天销量 {sales_7d} 件",
+                f"预测日销 {future_daily:.2f} 件",
+                f"FBA 可售 {fba_days:.2f} 天",
+                *risks[:2],
+            ],
+        }
+    )
+    return row
+
+
 def _norm_tag(value: str | None) -> str:
     return re.sub(r"[\s_\-]+", "", str(value or "").lower())
 
@@ -139,6 +183,79 @@ def _degraded_explanation(ctx: dict) -> str:
     return "".join(parts)
 
 
+def _ctx_listing_id(ctx: dict | None) -> int | None:
+    if not isinstance(ctx, dict):
+        return None
+    sku_ctx = ctx.get("sku")
+    raw = None
+    if isinstance(sku_ctx, dict):
+        raw = sku_ctx.get("listing_id") or sku_ctx.get("listingId")
+    raw = raw or ctx.get("listing_id") or ctx.get("listingId")
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt_date(v: date | None) -> str:
+    return v.isoformat() if v else "暂未生成"
+
+
+def _fmt_num(v: float | int | None, digits: int = 2) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, int) or float(v).is_integer():
+        return str(int(v))
+    return f"{float(v):.{digits}f}"
+
+
+def _local_sku_chat_text(question: str, dto: SkuSummaryDTO) -> str:
+    """模型不可用时,基于 SKU 快照生成确定性回答."""
+    q = question or ""
+    title = f"{dto.msku} · {dto.store_name or ''}".strip(" ·")
+    purchase_date = _fmt_date(dto.purchase_date)
+    stockout_date = _fmt_date(dto.stockout_date)
+    suggest_qty = int(dto.suggest_qty or 0)
+    fba_days = _fmt_num(dto.fba_sellable_days)
+    planning_stock = dto.planning_stock if dto.planning_stock is not None else dto.fba_available
+    coverage = _fmt_num(dto.coverage_demand)
+    future_daily = _fmt_num(dto.future_daily)
+
+    if re.search(r"下次|什么时候|采购时间|备货时间|何时|多久", q):
+        if dto.suggest and dto.purchase_date:
+            return (
+                f"{title} 的建议采购时间是 {purchase_date},建议采购 {suggest_qty} 件。\n"
+                f"依据是:FBA 可售约 {fba_days} 天,预计断货日 {stockout_date};"
+                f"覆盖周期需求 {coverage} 件,当前参与库存 {planning_stock or 0} 件。"
+            )
+        return (
+            f"{title} 当前暂未生成新的采购时间。"
+            f"当前 FBA 可售约 {fba_days} 天,预计断货日 {stockout_date},"
+            f"系统建议采购量为 {suggest_qty} 件。"
+        )
+
+    if re.search(r"为什么|原因|怎么来|依据|因素", q):
+        return (
+            f"{title} 当前风险等级为 {(dto.priority or '').upper()},核心原因是 "
+            f"FBA 可售约 {fba_days} 天、预测日销 {future_daily} 件、"
+            f"参与库存 {planning_stock or 0} 件,覆盖周期需求 {coverage} 件。"
+            f"因此系统给出的建议采购量是 {suggest_qty} 件。"
+        )
+
+    if re.search(r"采购量|补多少|买多少|数量", q):
+        return (
+            f"{title} 当前建议采购 {suggest_qty} 件。"
+            f"计算口径为覆盖周期需求 {coverage} 件 - 参与库存 {planning_stock or 0} 件,"
+            f"并按整件向上取整。"
+        )
+
+    return (
+        f"{title} 当前 FBA 可售约 {fba_days} 天,预计断货日 {stockout_date},"
+        f"建议采购时间 {purchase_date},建议采购 {suggest_qty} 件。"
+        "以上来自当前 SKU 备货快照。"
+    )
+
+
 class AiService:
     def __init__(
         self,
@@ -179,6 +296,30 @@ class AiService:
         }
         prompt = build_explain_prompt(dto, calc_run_id=calc_run_id)
         return calc_run_id, ctx, prompt
+
+    async def _build_local_chat_fallback(
+        self, req: ChatRequest, user_msgs: list[ChatMessage]
+    ) -> str:
+        """外部模型不可用时的本地回答,避免把供应商 503 暴露给用户."""
+        question = user_msgs[-1].content if user_msgs else ""
+        listing_id = _ctx_listing_id(req.context)
+        if listing_id:
+            calc_run_id = await self._dashboard_repo.latest_calc_run_id(req.tenant_id)
+            if calc_run_id:
+                row = await self._sku_repo.get_one(
+                    calc_run_id=calc_run_id,
+                    tenant_id=req.tenant_id,
+                    listing_id=listing_id,
+                )
+                if row is not None:
+                    stat, lps, mall_name = row
+                    dto = _row_to_dto(stat, lps, mall_name)
+                    return sanitize_user_ai_text(_local_sku_chat_text(question, dto))
+        return (
+            "AI 分析服务暂时不可用。我已保留当前页面的结构化分析结果,"
+            "你可以先参考上方风险卡片、采购建议和计算依据;"
+            "等服务恢复后再继续追问更开放的问题。"
+        )
 
     async def explain(self, req: ExplainRequest) -> ExplainResponse:
         _calc_run_id, ctx, prompt = await self._build_explain_inputs(req)
@@ -300,8 +441,9 @@ class AiService:
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("ai_chat_degraded: %s", e)
+            content = await self._build_local_chat_fallback(req, user_msgs)
             return ChatResponseMessage(
-                content="[降级] AI 服务暂不可用,请稍后重试或查看结构化数据。",
+                content=content,
                 model=settings.ai_model,
                 finish_reason="stop",
                 status="degraded",
@@ -351,8 +493,14 @@ class AiService:
                 yield event
         except Exception as e:  # noqa: BLE001
             logger.warning("ai_chat_stream_degraded: %s", e)
-            yield {"type": "error", "message": str(e)}
-            yield {"type": "done", "finish_reason": "stop", "tool_iterations": 0}
+            content = await self._build_local_chat_fallback(req, user_msgs)
+            yield {"type": "delta", "text": sanitize_user_ai_text(content)}
+            yield {
+                "type": "done",
+                "finish_reason": "stop",
+                "tool_iterations": 0,
+                "status": "degraded",
+            }
 
     async def decision_card(self, req: DecisionCardRequest) -> DecisionCardResponse:
         """结构化 AI 决策卡片.
@@ -370,6 +518,8 @@ class AiService:
 
         if req.scenario == "risk_queue":
             return await self._decision_risk_queue(req)
+        if req.scenario == "sales_leaders":
+            return await self._decision_sales_leaders(req)
         if req.scenario == "holiday_readiness":
             return await self._decision_holiday_readiness(req)
         if req.scenario == "plan_comparison":
@@ -458,6 +608,76 @@ class AiService:
             scenario=req.scenario,
             card=card,
             calc_run_id=snapshot.calc_run_id,
+        )
+
+    async def _decision_sales_leaders(self, req: DecisionCardRequest) -> DecisionCardResponse:
+        ctx = req.context or {}
+        sku_svc = SkuService(self._sku_repo, self._dashboard_repo)
+        page = await sku_svc.list_skus(
+            SkuListRequest(
+                tenant_id=req.tenant_id,
+                mall_ids=ctx.get("mall_ids"),
+                country_codes=ctx.get("country_codes"),
+                tags=ctx.get("tags"),
+                page=1,
+                page_size=200,
+                sort_by="priority",
+            )
+        )
+        candidates = [
+            s for s in page.rows
+            if (s.sales_7d or 0) > 0 or (s.future_daily or 0) > 0
+        ]
+        scored = []
+        for s in candidates:
+            sales_7d = float(s.sales_7d or 0)
+            future_daily = float(s.future_daily or 0)
+            fba_days = float(s.fba_sellable_days or 0)
+            margin = float(s.gross_margin or 0)
+            stock_penalty = 0.65 if fba_days < 7 else 0.85 if fba_days < 15 else 1.0
+            margin_bonus = 1.12 if margin >= 0.2 else 1.0 if margin >= 0 else 0.65
+            score = (sales_7d * 0.65 + future_daily * 7 * 0.35) * stock_penalty * margin_bonus
+            scored.append((score, s))
+        scored.sort(
+            key=lambda item: (
+                -item[0],
+                -(item[1].sales_7d or 0),
+                -(item[1].future_daily or 0),
+            )
+        )
+        leaders = scored[:6]
+        rows = [_sales_leader_row(s, score) for score, s in leaders]
+        total_sales = sum(int(s.sales_7d or 0) for _, s in scored)
+        leader_sales = sum(int(r.get("sales7d") or 0) for r in rows)
+        push_ready = sum(1 for r in rows if r.get("recommendation") in {"重点推广", "优先加码"})
+        calc_run_id = leaders[0][1].calc_run_id if leaders else await self._dashboard_repo.latest_calc_run_id(req.tenant_id)
+        card = {
+            "type": "sales_leaders",
+            "scope": "global",
+            "source": "backend",
+            "calcRunId": calc_run_id,
+            "severity": "p3",
+            "title": "销量领先 SKU 与主推建议",
+            "summary": f"基于全部 {page.total} 个 SKU,按近 7 天销量、预测日销、库存可支撑性和毛利筛选主推对象。",
+            "metrics": [
+                {"label": "参与 SKU", "value": page.total, "unit": "个"},
+                {"label": "近7天总销量", "value": total_sales, "unit": "件"},
+                {"label": "Top SKU销量", "value": leader_sales, "unit": "件"},
+                {"label": "可直接主推", "value": push_ready, "unit": "个"},
+            ],
+            "evidence": [
+                {"label": "排序口径", "value": "近7天销量 + 预测日销 + 库存 + 毛利"},
+                {"label": "库存约束", "value": "FBA 可售不足 7 天不直接加码"},
+                {"label": "推荐原则", "value": "热卖且库存健康优先,高风险先补货"},
+            ],
+            "rows": rows,
+            "actionItems": [{"id": r["id"], "qty": r["suggestQty"]} for r in rows if r.get("suggest")],
+        }
+        return DecisionCardResponse(
+            content="已基于全部 SKU 快照生成销量领先 SKU 与主推建议。",
+            scenario=req.scenario,
+            card=card,
+            calc_run_id=calc_run_id,
         )
 
     async def _decision_holiday_readiness(self, req: DecisionCardRequest) -> DecisionCardResponse:

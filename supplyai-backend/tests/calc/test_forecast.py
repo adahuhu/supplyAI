@@ -55,6 +55,7 @@ def test_project_series_with_seasonal_multiplier() -> None:
     assert points[0].forecast_qty == pytest.approx(10.0)
     assert points[1].forecast_qty == pytest.approx(15.0)
     assert points[2].forecast_qty == pytest.approx(20.0)
+    assert points[1].sales_multiplier == pytest.approx(1.5)
 
 
 def test_compute_forecast_default_uses_7d_avg() -> None:
@@ -99,6 +100,7 @@ def test_compute_forecast_dynamic_multiplier() -> None:
     assert out.forecast_source == "dynamic"
     assert out.series[1].forecast_qty == pytest.approx(20.0)
     assert out.series[2].forecast_qty == pytest.approx(30.0)
+    assert out.series[2].sales_multiplier == pytest.approx(3.0)
     # forecast_daily 取窗口均值 (10+20+30)/3 = 20
     assert out.forecast_daily == pytest.approx(20.0)
 

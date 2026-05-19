@@ -18,6 +18,7 @@ class ExportSkuListRequest(BaseModel):
     priorities: list[Priority] | None = None
     mall_ids: list[int] | None = None
     country_codes: list[str] | None = None
+    tags: list[str] | None = None
     keyword: str | None = None
     suggest_only: bool = False
     created_by: str | None = None

@@ -65,6 +65,7 @@ class ExportService:
             priorities=req.priorities,
             mall_ids=req.mall_ids,
             country_codes=req.country_codes,
+            tags=req.tags,
             keyword=req.keyword,
             suggest_only=req.suggest_only,
             page=1,

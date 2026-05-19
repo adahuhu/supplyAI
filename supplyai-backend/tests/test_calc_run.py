@@ -112,6 +112,46 @@ async def test_calc_run_default_stock_scope_is_fba_available(
             )
 
 
+async def test_calc_run_preserves_recent_stockout_fba_zero(
+    client: AsyncClient,
+) -> None:
+    """计算后近 7 天断货 SKU 仍应能筛出,且 FBA 可用为 0."""
+    run_resp = await client.post(
+        "/api/supplyai/calc/run", json={"tenant_id": 100228}
+    )
+    assert run_resp.status_code == 200
+
+    list_resp = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "stockout_within_days": 7, "page_size": 50},
+    )
+    assert list_resp.status_code == 200
+    rows = list_resp.json()["rows"]
+    assert len(rows) == 3
+    assert all(row["stockout_recent_7"] is True for row in rows)
+    assert all(row["fba_available"] == 0 for row in rows)
+    assert all(row["planning_stock"] == 0 for row in rows)
+
+
+async def test_calc_run_preserves_sku_tags(
+    client: AsyncClient,
+) -> None:
+    """重新计算后的快照仍应保留 SKU 标签,供列表标签筛选使用."""
+    run_resp = await client.post(
+        "/api/supplyai/calc/run", json={"tenant_id": 100228}
+    )
+    assert run_resp.status_code == 200
+
+    list_resp = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "tags": ["新品"], "page_size": 50},
+    )
+    assert list_resp.status_code == 200
+    rows = list_resp.json()["rows"]
+    assert rows
+    assert all("新品" in row["tags"] for row in rows)
+
+
 async def test_calc_run_risk_level_matches_fba_sellable_days(
     client: AsyncClient,
 ) -> None:

@@ -1,5 +1,7 @@
 // 备货计划列表页 — full data table with filters, batch ops, column config.
 
+const LIST_SELECTED_BG = 'color-mix(in srgb, var(--accent) 18%, var(--surface))';
+
 const LIST_SORT_ACCESSORS = {
   product: s => s.name || '',
   sku: s => s.sku || '',
@@ -47,15 +49,137 @@ function avgBy(rows, fn) {
   return vals.reduce((sum, v) => sum + Number(v), 0) / vals.length;
 }
 
-function FilterBar({ filter, setFilter }) {
+function normalizeTagValue(tag) {
+  return String(tag || '').trim();
+}
+
+function buildTagFilterOptions(rows) {
+  const counts = new Map();
+  rows.forEach((s) => {
+    (s.tags || []).forEach((tag) => {
+      const value = normalizeTagValue(tag);
+      if (!value) return;
+      counts.set(value, (counts.get(value) || 0) + 1);
+    });
+  });
+  return Array.from(counts.entries())
+    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0], 'zh-Hans-CN'))
+    .map(([value, count]) => ({ value, label: value, count }));
+}
+
+function buildValueFilterOptions(rows, getValue, getLabel) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const rawValue = getValue(row);
+    if (rawValue == null || rawValue === '') return;
+    const value = String(rawValue);
+    const label = getLabel ? getLabel(row, value) : value;
+    const cur = map.get(value) || { value, label, count: 0 };
+    cur.count += 1;
+    if (!cur.label && label) cur.label = label;
+    map.set(value, cur);
+  });
+  return Array.from(map.values())
+    .sort((a, b) => (b.count - a.count) || String(a.label).localeCompare(String(b.label), 'zh-Hans-CN'));
+}
+
+function countRows(rows, predicate) {
+  return rows.reduce((sum, row) => sum + (predicate(row) ? 1 : 0), 0);
+}
+
+function sellableBucketOf(s) {
+  const days = s.sellable ?? 0;
+  if (days < 15) return 'lt15';
+  if (days <= 60) return '15to60';
+  return 'gt60';
+}
+
+function TagFilter({ options, selectedValue, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const selected = (options || []).find((o) => o.value === selectedValue);
+  const valueText = selected ? `${selected.label} (${selected.count})` : '全部标签';
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button className="btn" type="button" onClick={() => setOpen((v) => !v)} style={{ paddingRight: 8 }}>
+        <span style={{ color: 'var(--text-3)', fontSize: 11.5 }}>标签</span>
+        <span style={{ fontWeight: 500 }}>{valueText}</span>
+        <Icon name="chevron-down" size={12} color="var(--text-3)" />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+          minWidth: 220, maxHeight: 360, overflow: 'auto',
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 'var(--r-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+          padding: 4, zIndex: 100,
+        }}>
+          <div
+            onClick={() => { onChange?.(null); setOpen(false); }}
+            style={{
+              padding: '8px 10px', fontSize: 12.5, cursor: 'pointer',
+              color: !selectedValue ? 'var(--accent-text)' : 'var(--text-2)',
+              fontWeight: !selectedValue ? 600 : 400,
+              borderRadius: 4,
+              background: !selectedValue ? 'var(--accent-soft)' : 'transparent',
+            }}>
+            全部标签
+          </div>
+          {(options || []).length === 0 && (
+            <div style={{ padding: '8px 10px', fontSize: 11.5, color: 'var(--text-4)' }}>无标签</div>
+          )}
+          {(options || []).map((o) => {
+            const active = o.value === selectedValue;
+            return (
+              <div
+                key={o.value}
+                onClick={() => { onChange?.(o.value); setOpen(false); }}
+                style={{
+                  padding: '8px 10px', fontSize: 12.5, cursor: 'pointer',
+                  color: active ? 'var(--accent-text)' : 'var(--text-2)',
+                  fontWeight: active ? 600 : 400,
+                  borderRadius: 4,
+                  background: active ? 'var(--accent-soft)' : 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--surface-hover)'; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
+                <span className="tabular" style={{
+                  fontSize: 11, color: active ? 'var(--accent-text)' : 'var(--text-4)',
+                  background: active ? 'transparent' : 'var(--surface-hover)',
+                  padding: '1px 6px', borderRadius: 999,
+                }}>{o.count}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterBar({ filter, setFilter, counts }) {
   const segs = [
-  { v: 'all', label: '全部', count: 48 },
-  { v: 'p1', label: 'P1 紧急', count: DASH_STATS.counts.p1, color: 'p1' },
-  { v: 'p2', label: 'P2 重要', count: DASH_STATS.counts.p2, color: 'p2' },
-  { v: 'p3', label: 'P3 关注', count: DASH_STATS.counts.p3, color: 'p3' },
-  { v: 'safe', label: '安全', count: DASH_STATS.counts.safe, color: 'safe' },
-  { v: 'suggest', label: '建议采购', count: DASH_STATS.suggestSkuCount },
-  { v: 'stockout7', label: '7 天内断货', count: DASH_STATS.stockout7 }];
+  { v: 'all', label: '全部', count: counts?.all ?? SKUS.length },
+  { v: 'p1', label: 'P1 紧急', count: counts?.p1 ?? 0, color: 'p1' },
+  { v: 'p2', label: 'P2 重要', count: counts?.p2 ?? 0, color: 'p2' },
+  { v: 'p3', label: 'P3 关注', count: counts?.p3 ?? 0, color: 'p3' },
+  { v: 'safe', label: '安全', count: counts?.safe ?? 0, color: 'safe' },
+  { v: 'suggest', label: '建议采购', count: counts?.suggest ?? 0 },
+  { v: 'stockout7', label: '7 天内断货', count: counts?.stockout7 ?? 0 }];
 
   return (
     <div style={{
@@ -106,9 +230,12 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
   const [sellableBucket, setSellableBucket] = React.useState(null); // 'lt15'/'15to60'/'gt60'
   const [brandFilter, setBrandFilter] = React.useState(null);
   const [categoryFilter, setCategoryFilter] = React.useState(null);
+  const [tagFilter, setTagFilter] = React.useState(null);
   const [selected, setSelected] = React.useState(new Set());
   const [advFilters, setAdvFilters] = React.useState(false);
   const [columnsOpen, setColumnsOpen] = React.useState(false);
+  const [bulkForecastOpen, setBulkForecastOpen] = React.useState(false);
+  const [bulkForecastMode, setBulkForecastMode] = React.useState('filtered');
 
   React.useEffect(() => {
     setFilter(initialFilter || 'all');
@@ -122,16 +249,20 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     setStoreFilter(initialMallId ? String(initialMallId) : null);
   }, [initialMallId]);
 
-  const filtered = React.useMemo(() => {
-    let rows = SKUS;
-    if (filter === 'p1') rows = rows.filter((s) => s.priority === 'p1');else
-    if (filter === 'p2') rows = rows.filter((s) => s.priority === 'p2');else
-    if (filter === 'p3') rows = rows.filter((s) => s.priority === 'p3');else
-    if (filter === 'safe') rows = rows.filter((s) => s.priority === 'safe');else
-    if (filter === 'suggest') rows = rows.filter((s) => s.suggest);else
-    if (filter === 'stockout7') rows = rows.filter(isStockout7Sku);
+  const applyFilters = React.useCallback((sourceRows, opts = {}) => {
+    const skip = new Set(opts.skip || []);
+    const shouldApply = (name) => !skip.has(name);
+    let rows = sourceRows || [];
+    if (shouldApply('segment')) {
+      if (filter === 'p1') rows = rows.filter((s) => s.priority === 'p1');else
+      if (filter === 'p2') rows = rows.filter((s) => s.priority === 'p2');else
+      if (filter === 'p3') rows = rows.filter((s) => s.priority === 'p3');else
+      if (filter === 'safe') rows = rows.filter((s) => s.priority === 'safe');else
+      if (filter === 'suggest') rows = rows.filter((s) => s.suggest);else
+      if (filter === 'stockout7') rows = rows.filter(isStockout7Sku);
+    }
 
-    if (keyword.trim()) {
+    if (shouldApply('keyword') && keyword.trim()) {
       const kw = keyword.trim().toLowerCase();
       rows = rows.filter(s =>
         (s.msku || '').toLowerCase().includes(kw)
@@ -143,19 +274,87 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
         || (s.tags || []).some(tag => String(tag).toLowerCase().includes(kw))
       );
     }
-    if (storeFilter) rows = rows.filter(s => String(s.mallId) === storeFilter);
-    if (countryFilter) rows = rows.filter(s => (s.country?.code || '') === countryFilter);
-    if (ownerFilter) rows = rows.filter(s => s.owner === ownerFilter);
-    if (suggestOnly === 'yes') rows = rows.filter(s => s.suggest);
-    else if (suggestOnly === 'no') rows = rows.filter(s => !s.suggest);
-    if (statusFilter) rows = rows.filter(s => s.status === statusFilter);
-    if (sellableBucket === 'lt15') rows = rows.filter(s => (s.sellable ?? 0) < 15);
-    else if (sellableBucket === '15to60') rows = rows.filter(s => (s.sellable ?? 0) >= 15 && (s.sellable ?? 0) <= 60);
-    else if (sellableBucket === 'gt60') rows = rows.filter(s => (s.sellable ?? 0) > 60);
-    if (brandFilter) rows = rows.filter(s => s.brand === brandFilter);
-    if (categoryFilter) rows = rows.filter(s => s.category === categoryFilter);
+    if (shouldApply('store') && storeFilter) rows = rows.filter(s => String(s.mallId) === storeFilter);
+    if (shouldApply('country') && countryFilter) rows = rows.filter(s => (s.country?.code || '') === countryFilter);
+    if (shouldApply('owner') && ownerFilter) rows = rows.filter(s => s.owner === ownerFilter);
+    if (shouldApply('suggestOnly') && suggestOnly === 'yes') rows = rows.filter(s => s.suggest);
+    else if (shouldApply('suggestOnly') && suggestOnly === 'no') rows = rows.filter(s => !s.suggest);
+    if (shouldApply('status') && statusFilter) rows = rows.filter(s => s.status === statusFilter);
+    if (shouldApply('sellable') && sellableBucket) rows = rows.filter(s => sellableBucketOf(s) === sellableBucket);
+    if (shouldApply('brand') && brandFilter) rows = rows.filter(s => s.brand === brandFilter);
+    if (shouldApply('category') && categoryFilter) rows = rows.filter(s => s.category === categoryFilter);
+    if (shouldApply('tag') && tagFilter) {
+      const selectedTag = normalizeTagValue(tagFilter);
+      rows = rows.filter(s => (s.tags || []).some(tag => normalizeTagValue(tag) === selectedTag));
+    }
     return rows;
-  }, [filter, keyword, storeFilter, countryFilter, ownerFilter, suggestOnly, statusFilter, sellableBucket, brandFilter, categoryFilter, localVersion]);
+  }, [filter, keyword, storeFilter, countryFilter, ownerFilter, suggestOnly, statusFilter, sellableBucket, tagFilter, brandFilter, categoryFilter, localVersion]);
+
+  const filtered = React.useMemo(() => applyFilters(SKUS), [applyFilters]);
+
+  const segmentCounts = React.useMemo(() => {
+    const rows = applyFilters(SKUS, { skip: ['segment'] });
+    return {
+      all: rows.length,
+      p1: countRows(rows, s => s.priority === 'p1'),
+      p2: countRows(rows, s => s.priority === 'p2'),
+      p3: countRows(rows, s => s.priority === 'p3'),
+      safe: countRows(rows, s => s.priority === 'safe'),
+      suggest: countRows(rows, s => s.suggest),
+      stockout7: countRows(rows, isStockout7Sku),
+    };
+  }, [applyFilters]);
+
+  const countryOptions = React.useMemo(
+    () => buildValueFilterOptions(
+      applyFilters(SKUS, { skip: ['country'] }),
+      s => s.country?.code,
+      s => `${s.country?.flag || ''} ${s.country?.name || s.country?.code || ''}`.trim()
+    ),
+    [applyFilters]
+  );
+  const storeOptions = React.useMemo(
+    () => buildValueFilterOptions(applyFilters(SKUS, { skip: ['store'] }), s => s.mallId, s => s.store),
+    [applyFilters]
+  );
+  const ownerOptions = React.useMemo(
+    () => buildValueFilterOptions(applyFilters(SKUS, { skip: ['owner'] }), s => s.owner),
+    [applyFilters]
+  );
+  const categoryOptions = React.useMemo(
+    () => buildValueFilterOptions(applyFilters(SKUS, { skip: ['category'] }), s => s.category),
+    [applyFilters]
+  );
+  const brandOptions = React.useMemo(
+    () => buildValueFilterOptions(applyFilters(SKUS, { skip: ['brand'] }), s => s.brand),
+    [applyFilters]
+  );
+  const tagOptions = React.useMemo(
+    () => buildTagFilterOptions(applyFilters(SKUS, { skip: ['tag'] })),
+    [applyFilters]
+  );
+  const suggestOptions = React.useMemo(() => {
+    const rows = applyFilters(SKUS, { skip: ['suggestOnly'] });
+    return [
+      { value: 'yes', label: '建议采购', count: countRows(rows, s => s.suggest) },
+      { value: 'no', label: '不建议', count: countRows(rows, s => !s.suggest) },
+    ];
+  }, [applyFilters]);
+  const statusOptions = React.useMemo(() => {
+    const rows = applyFilters(SKUS, { skip: ['status'] });
+    return [
+      { value: '在售', label: '在售', count: countRows(rows, s => s.status === '在售') },
+      { value: '已下架', label: '已下架', count: countRows(rows, s => s.status === '已下架') },
+    ];
+  }, [applyFilters]);
+  const sellableOptions = React.useMemo(() => {
+    const rows = applyFilters(SKUS, { skip: ['sellable'] });
+    return [
+      { value: 'lt15', label: '< 15 天', count: countRows(rows, s => sellableBucketOf(s) === 'lt15') },
+      { value: '15to60', label: '15-60 天', count: countRows(rows, s => sellableBucketOf(s) === '15to60') },
+      { value: 'gt60', label: '> 60 天', count: countRows(rows, s => sellableBucketOf(s) === 'gt60') },
+    ];
+  }, [applyFilters]);
 
   const sorted = React.useMemo(() => {
     const rows = [...filtered];
@@ -176,6 +375,44 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     });
     return rows;
   }, [filtered, sort]);
+
+  const selectedRows = React.useMemo(
+    () => Array.from(selected).map(id => SKUS.find(s => s.id === id)).filter(Boolean),
+    [selected, localVersion]
+  );
+
+  const openBulkForecast = React.useCallback((mode = 'filtered') => {
+    setBulkForecastMode(mode);
+    setBulkForecastOpen(true);
+  }, []);
+
+  const applyBulkForecastDaily = React.useCallback(async (rows, nextDaily) => {
+    const targets = (rows || []).filter(s => s && s.msku && (s.mall_id != null || s.mallId != null));
+    if (!targets.length) throw new Error('当前没有可应用的 SKU');
+    if (!window.api || !window.api.forecastRulesUpsert) throw new Error('预测规则接口不可用');
+
+    for (const sku of targets) {
+      await window.api.forecastRulesUpsert({
+        scope_type: 'sku',
+        mall_id: sku.mall_id ?? sku.mallId ?? null,
+        msku: sku.msku,
+        forecast_mode: 'fixed',
+        fixed_daily_sales: nextDaily,
+        default_daily_sales: null,
+        weight_3d: 0,
+        weight_7d: 100,
+        weight_15d: 0,
+        weight_30d: 0,
+        denoise_enabled: false,
+        abnormal_dates_json: null,
+        abnormal_sales_rule_json: null,
+        updated_by: 'frontend_bulk',
+      });
+    }
+    if (window.api.calcRun) await window.api.calcRun();
+    targets.forEach(sku => recalcSkuForecastList(sku, nextDaily));
+    bumpLocalVersion();
+  }, []);
 
   const totals = React.useMemo(() => ({
     sales7d: sumBy(filtered, s => s.sales7d ?? (s.recent7 || []).reduce((a, b) => a + b, 0)),
@@ -203,6 +440,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     setSuggestOnly(null);
     setStatusFilter(null);
     setSellableBucket(null);
+    setTagFilter(null);
     setBrandFilter(null);
     setCategoryFilter(null);
   }, []);
@@ -284,28 +522,18 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
               placeholder="SKU / 品名 / MSKU / FNSKU / ASIN"
               style={{ width: '100%', paddingLeft: 30 }} />
           </div>
-          {(() => {
-            const f = window.FILTERS_DATA || { stores: [], countries: [] };
-            return (
-              <>
-                <Filter label="国家"
-                  options={f.countries}
-                  selectedValue={countryFilter}
-                  onChange={setCountryFilter}/>
-                <Filter label="店铺"
-                  options={f.stores}
-                  selectedValue={storeFilter}
-                  onChange={setStoreFilter}/>
-                <Filter label="是否建议采购"
-                  options={[
-                    { value: 'yes', label: '建议采购', count: SKUS.filter(s => s.suggest).length },
-                    { value: 'no', label: '不建议', count: SKUS.filter(s => !s.suggest).length },
-                  ]}
-                  selectedValue={suggestOnly}
-                  onChange={setSuggestOnly}/>
-              </>
-            );
-          })()}
+          <Filter label="国家"
+            options={countryOptions}
+            selectedValue={countryFilter}
+            onChange={setCountryFilter}/>
+          <Filter label="店铺"
+            options={storeOptions}
+            selectedValue={storeFilter}
+            onChange={setStoreFilter}/>
+          <Filter label="是否建议采购"
+            options={suggestOptions}
+            selectedValue={suggestOnly}
+            onChange={setSuggestOnly}/>
           <button className="btn ghost" onClick={() => setAdvFilters(!advFilters)} style={{ color: 'var(--accent-text)' }}>
             <Icon name="filter" size={13} />高级筛选 {advFilters ? '收起' : '展开'}
           </button>
@@ -315,38 +543,28 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 
         {advFilters &&
         <div className="fade-in" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '10px 12px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
-            {(() => {
-              const f = window.FILTERS_DATA || { owners: [], brands: [], categories: [] };
-              return (
-                <>
-                  <Filter label="负责人"
-                    options={f.owners}
-                    selectedValue={ownerFilter}
-                    onChange={setOwnerFilter}/>
-                  <Filter label="分类"
-                    options={f.categories}
-                    selectedValue={categoryFilter}
-                    onChange={setCategoryFilter}/>
-                  <Filter label="品牌"
-                    options={f.brands}
-                    selectedValue={brandFilter}
-                    onChange={setBrandFilter}/>
-                </>
-              );
-            })()}
+            <Filter label="负责人"
+              options={ownerOptions}
+              selectedValue={ownerFilter}
+              onChange={setOwnerFilter}/>
+            <Filter label="分类"
+              options={categoryOptions}
+              selectedValue={categoryFilter}
+              onChange={setCategoryFilter}/>
+            <Filter label="品牌"
+              options={brandOptions}
+              selectedValue={brandFilter}
+              onChange={setBrandFilter}/>
+            <TagFilter
+              options={tagOptions}
+              selectedValue={tagFilter}
+              onChange={setTagFilter}/>
             <Filter label="状态"
-              options={[
-                { value: '在售', label: '在售', count: SKUS.filter(s => s.status === '在售').length },
-                { value: '已下架', label: '已下架', count: SKUS.filter(s => s.status === '已下架').length },
-              ]}
+              options={statusOptions}
               selectedValue={statusFilter}
               onChange={setStatusFilter}/>
             <Filter label="可售天数"
-              options={[
-                { value: 'lt15', label: '< 15 天', count: SKUS.filter(s => (s.sellable ?? 0) < 15).length },
-                { value: '15to60', label: '15–60 天', count: SKUS.filter(s => (s.sellable ?? 0) >= 15 && (s.sellable ?? 0) <= 60).length },
-                { value: 'gt60', label: '> 60 天', count: SKUS.filter(s => (s.sellable ?? 0) > 60).length },
-              ]}
+              options={sellableOptions}
               selectedValue={sellableBucket}
               onChange={setSellableBucket}/>
             <button className="btn ghost sm" onClick={clearAdvFilters}>清除全部</button>
@@ -354,7 +572,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
         }
       </div>
 
-      <FilterBar filter={filter} setFilter={setFilter} />
+      <FilterBar filter={filter} setFilter={setFilter} counts={segmentCounts} />
 
       {/* Batch action bar — 与 header / 表格水平对齐;flex:none 不挤压表格 */}
       {selected.size > 0 &&
@@ -379,6 +597,9 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
             skus: Array.from(selected).map(id => SKUS.find(s => s.id === id)).filter(Boolean),
           })}>
             <Icon name="settings" size={12} />批量规则设置
+          </button>
+          <button className="btn sm" onClick={() => openBulkForecast('selected')}>
+            <Icon name="edit" size={12} />批量预测日销
           </button>
           <button className="btn sm primary" onClick={() => openCreatePO(Array.from(selected))}>
             <Icon name="lightning" size={12} />生成采购计划（{selected.size}）
@@ -432,10 +653,10 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                 <tr key={s.id} className={sel ? 'selected' : ''}
                 style={{ cursor: 'pointer' }}
                 onClick={() => setRoute({ page: 'sku', skuId: s.id })}>
-                  <td style={{ position: 'sticky', left: 0, background: sel ? 'var(--accent-soft)' : 'var(--surface)', zIndex: 1, boxShadow: '1px 0 0 var(--border)' }} onClick={(e) => e.stopPropagation()}>
+                  <td style={{ position: 'sticky', left: 0, background: sel ? LIST_SELECTED_BG : 'var(--surface)', zIndex: 1, boxShadow: '1px 0 0 var(--border)' }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={sel} onChange={() => toggleOne(s.id)} />
                   </td>
-                  <td style={{ position: 'sticky', left: 36, background: sel ? 'var(--accent-soft)' : 'var(--surface)', zIndex: 1, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>
+                  <td style={{ position: 'sticky', left: 36, background: sel ? LIST_SELECTED_BG : 'var(--surface)', zIndex: 1, boxShadow: '4px 0 6px -4px rgba(0,0,0,0.35)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: 280 }}>
                       <ProductImage label={s.msku.slice(-3)} size={36} />
                       <div style={{ minWidth: 0 }}>
@@ -509,7 +730,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                   <td className="num tabular" style={{ fontWeight: 500 }}>{s.suggest ? fmt.num(s.suggestQty) : '—'}</td>
                   <td className="tabular muted">{s.suggest ? fmt.dateLong(s.purchaseDate) : '—'}</td>
                   <td className="tabular muted" style={{ fontSize: 11 }}>{fmt.time(s.lastUpdated)}</td>
-                  <td style={{ position: 'sticky', right: 0, background: sel ? 'var(--accent-soft)' : 'var(--surface)', zIndex: 1 }} onClick={(e) => e.stopPropagation()}>
+                  <td style={{ position: 'sticky', right: 0, background: sel ? LIST_SELECTED_BG : 'var(--surface)', zIndex: 1 }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 2 }}>
                       <button className="btn ghost icon sm" title="规则设置" onClick={() => openRules({ sku: s })}><Icon name="settings" size={13} /></button>
                       <button className="btn ghost icon sm" title="生成采购计划" onClick={() => openCreatePO([s.id])}><Icon name="plus" size={13} /></button>
@@ -602,6 +823,14 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
           <button className="btn primary" onClick={() => setColumnsOpen(false)}>应用</button>
         </div>
       </Drawer>
+
+      <BulkForecastDailyModal
+        open={bulkForecastOpen}
+        mode={bulkForecastMode}
+        rows={bulkForecastMode === 'selected' ? selectedRows : filtered}
+        onClose={() => setBulkForecastOpen(false)}
+        onApply={applyBulkForecastDaily}
+      />
     </div>);
 
 }
@@ -610,6 +839,120 @@ function dateAddList(base, days) {
   const d = new Date(base || Date.now());
   d.setDate(d.getDate() + Math.ceil(days || 0));
   return d;
+}
+
+function BulkForecastDailyModal({ open, mode, rows, onClose, onApply }) {
+  const safeRows = rows || [];
+  const rowKey = safeRows.map(s => s.id).join('|');
+  const [value, setValue] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  React.useEffect(() => {
+    if (!open) return;
+    const avg = avgBy(safeRows, s => s.futureDaily);
+    setValue(avg == null ? '' : String(+avg.toFixed(2)));
+    setErr('');
+    setSaving(false);
+  }, [open, rowKey, mode]);
+
+  const count = safeRows.length;
+  const currentAvg = avgBy(safeRows, s => s.futureDaily);
+  const currentTotal = sumBy(safeRows, s => s.futureDaily);
+  const next = Number(value);
+  const nextValid = Number.isFinite(next) && next >= 0;
+  const nextTotal = nextValid ? +(next * count).toFixed(2) : null;
+  const title = mode === 'selected' ? '批量设置已选预测日销' : '批量设置筛选结果预测日销';
+  const targetText = mode === 'selected'
+    ? `将应用到已勾选的 ${count} 个 SKU`
+    : `将应用到当前筛选结果的 ${count} 个 SKU`;
+
+  const commit = async () => {
+    if (!count) {
+      setErr('当前没有可应用的 SKU');
+      return;
+    }
+    if (!nextValid) {
+      setErr('请输入大于等于 0 的数字');
+      return;
+    }
+    setSaving(true);
+    setErr('');
+    try {
+      await onApply?.(safeRows, +next.toFixed(2));
+      onClose?.();
+    } catch (e) {
+      setErr(e.message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={saving ? undefined : onClose} width={520}>
+      <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Icon name="edit" size={16} color="var(--accent)"/>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
+          <div style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 3 }}>{targetText}</div>
+        </div>
+        <button className="btn ghost icon sm" disabled={saving} onClick={onClose}><Icon name="x" size={14}/></button>
+      </div>
+      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+          <div style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>当前数量</div>
+            <div className="tabular" style={{ fontWeight: 700, marginTop: 4 }}>{count}</div>
+          </div>
+          <div style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>当前均值</div>
+            <div className="tabular" style={{ fontWeight: 700, marginTop: 4 }}>{currentAvg == null ? '—' : currentAvg.toFixed(2)}</div>
+          </div>
+          <div style={{ padding: 10, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface-2)' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>当前合计</div>
+            <div className="tabular" style={{ fontWeight: 700, marginTop: 4 }}>{fmt.num(+currentTotal.toFixed(2))}</div>
+          </div>
+        </div>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>新的预测日销</span>
+          <input
+            className="txt"
+            autoFocus
+            type="number"
+            min="0"
+            step="0.01"
+            value={value}
+            disabled={saving}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit();
+              if (e.key === 'Escape' && !saving) onClose?.();
+            }}
+            placeholder="例如 12.5"
+            style={{ height: 38, fontSize: 14 }}
+          />
+        </label>
+
+        <div style={{ padding: '10px 12px', border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)', background: 'var(--accent-soft)', borderRadius: 6, color: 'var(--accent-text)', fontSize: 12, lineHeight: 1.6 }}>
+          保存后会同步重算当前列表里的可售天数、风险等级、建议采购量和合计数据。
+          {nextTotal != null && <span className="tabular"> 新预测日销合计：{fmt.num(nextTotal)}</span>}
+        </div>
+
+        {err && (
+          <div style={{ color: 'var(--p1)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="alert" size={13}/>{err}
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <button className="btn" disabled={saving} onClick={onClose}>取消</button>
+        <button className="btn primary" disabled={saving || !count || !nextValid} onClick={commit}>
+          {saving ? '保存中...' : `保存并重算（${count}）`}
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 function recalcSkuForecastList(sku, nextDaily) {
