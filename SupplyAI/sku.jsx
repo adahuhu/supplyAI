@@ -202,7 +202,7 @@ function SKUTrendChart({
       const d = trendDateAdd(SKU_TREND_TODAY, offset);
       return { i, x: toX(i), d, isToday: i === history.length && !isHistoryOnly, isFuture: i >= history.length };
     });
-  const stockoutOffset = sku.fbaSellable;
+  const stockoutOffset = sku.sellable;
   const stockoutX = !isHistoryOnly && stockoutOffset >= 0 && stockoutOffset < futDays
     ? toX(history.length + stockoutOffset)
     : null;
@@ -1837,7 +1837,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
             boxShadow: 'var(--sh-inset-top)',
           }}>
             <RiskCellWithExplain sku={sku}/>
-            <DetailStat label="预计断货时间" main={fmt.dateLong(sku.stockoutDate)} sub={fmt.rel(sku.stockoutDate) + ' · 仅 FBA 侧'}/>
+            <DetailStat label="预计断货时间" main={fmt.dateLong(sku.stockoutDate)} sub={fmt.rel(sku.stockoutDate) + ' · ' + (sku.stockScopeLabel || '规则库存') + '口径'}/>
             <DetailStat label="建议采购量" main={fmt.num(sku.suggestQty) + ' 件'} sub={`覆盖周期需求 ${sku.coverageDemand} − 参与库存 ${sku.planningStock ?? sku.fbaAvail}`}/>
             <DetailStat label="建议采购时间" main={fmt.dateLong(sku.purchaseDate)} sub={(() => {
               const r = fmt.rel(sku.purchaseDate);
@@ -1975,7 +1975,7 @@ function RiskCellWithExplain({ sku }) {
         {sku.priority.toUpperCase()} · {label}
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-        FBA 可售 {(+sku.fbaSellable).toFixed(2)} 天 · 阈值 P1 ≤ 7d
+        可售天数 {(+sku.sellable).toFixed(2)} 天 · 阈值 P1 ≤ 7d
         <span style={{ color: 'var(--text-4)', marginLeft: 6 }}>查看计算</span>
       </div>
 
@@ -2006,8 +2006,8 @@ function RiskCellWithExplain({ sku }) {
           <CalcRow k="总库存" v={`${sku.totalStock} = FBA ${sku.fbaAvail + sku.fbaInTransit} + 本地 ${sku.localTotal}`}/>
           <CalcRow k="参与库存" v={`${sku.planningStock ?? sku.fbaAvail} = ${sku.stockScopeLabel || 'FBA 可用'}`}/>
           <CalcRow k="建议采购" v={`${sku.coverageDemand} − ${sku.planningStock ?? sku.fbaAvail} = ${fmt.num(sku.suggestQty)} 件`} highlight/>
-          <CalcRow k="风险判定" v={`FBA 可售 ${(+sku.fbaSellable).toFixed(2)}d → ${sku.priority.toUpperCase()}（仅 FBA 侧）`}/>
-          <CalcRow k="预计断货" v={`今天 + ${(+sku.fbaSellable).toFixed(2)}d = ${fmt.dateLong(sku.stockoutDate)}`}/>
+          <CalcRow k="风险判定" v={`可售天数 ${(+sku.sellable).toFixed(2)}d → ${sku.priority.toUpperCase()}（${sku.stockScopeLabel || '规则库存'}口径）`}/>
+          <CalcRow k="预计断货" v={`今天 + ${(+sku.sellable).toFixed(2)}d = ${fmt.dateLong(sku.stockoutDate)}`}/>
           <CalcRow k="建议采购日" v={`断货 − ${sku.purchaseLeadTime}d = ${fmt.dateLong(sku.purchaseDate)}`} last/>
         </div>
       )}

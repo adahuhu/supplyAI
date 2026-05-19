@@ -34,7 +34,7 @@ def build_tools() -> list[ToolDef]:
             name="query_stockout_risk",
             description=(
                 "查询风险队列(P1>P2>P3>safe 排序),可按 mall_ids / country_codes / owners 过滤。"
-                "返回商品编号、MSKU、风险等级、FBA 可售天数、行动建议、店铺名称等。"
+                "返回商品编号、MSKU、风险等级、可售天数、行动建议、店铺名称等。"
                 "如果用户在某 SKU 详情或选了店铺过滤,务必把对应店铺编号传过来。"
             ),
             parameters={
@@ -374,7 +374,7 @@ async def _t_compare_logistics_options(args: dict, session: AsyncSession) -> dic
         "qty_target": qty,
         "unit_cost": unit_cost,
         "plans": plans,
-        "recommendation_hint": "如果 fba_sellable_days ≤ 5,优先选含空运的方案;否则纯海运成本最低",
+        "recommendation_hint": "如果可售天数 ≤ 5,优先选含空运的方案;否则纯海运成本最低",
     }
 
 

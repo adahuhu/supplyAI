@@ -161,7 +161,7 @@ def _row_to_dto(
         gross_margin=_to_float(stat.gross_margin),
         financial_estimate_type=stat.financial_estimate_type,  # type: ignore[arg-type]
         expected_loss_revenue_7d=_compute_loss_revenue_7d(
-            stat.fba_sellable_days, stat.forecast_daily, stat.unit_cost
+            stat.sellable_days, stat.forecast_daily, stat.unit_cost
         ),
         future_30d_profit=_compute_future_30d_profit(
             stat.forecast_daily, stat.unit_cost

@@ -331,17 +331,18 @@ def _deterministic_tool_summary(payload: Any) -> str:
                 continue
             sku = row.get("sku") or row.get("msku") or row.get("title") or row.get("name")
             risk = row.get("priority") or row.get("risk_level")
-            fba_days = (
-                row.get("fba_sellable_days")
+            sellable_days = (
+                row.get("sellable_days")
+                or row.get("sellableDays")
+                or row.get("fba_sellable_days")
                 or row.get("fba_sellable")
-                or row.get("sellable_days")
             )
             suggest_qty = row.get("suggest_qty") or row.get("suggested_qty")
             parts = [str(sku)] if sku else []
             if risk:
                 parts.append(f"风险 {risk}")
-            if fba_days is not None:
-                parts.append(f"FBA 可售 {fba_days} 天")
+            if sellable_days is not None:
+                parts.append(f"可售天数 {sellable_days} 天")
             if suggest_qty is not None:
                 parts.append(f"建议采购 {suggest_qty}")
             if parts:
@@ -354,15 +355,20 @@ def _deterministic_tool_summary(payload: Any) -> str:
     if isinstance(summary, dict):
         msku = summary.get("msku") or summary.get("sku")
         risk = summary.get("priority") or summary.get("risk_level")
-        fba_days = summary.get("fba_sellable_days") or summary.get("fba_sellable")
+        sellable_days = (
+            summary.get("sellable_days")
+            or summary.get("sellableDays")
+            or summary.get("fba_sellable_days")
+            or summary.get("fba_sellable")
+        )
         suggest_qty = summary.get("suggest_qty") or summary.get("suggested_qty")
         parts = []
         if msku:
             parts.append(f"SKU {msku}")
         if risk:
             parts.append(f"风险 {risk}")
-        if fba_days is not None:
-            parts.append(f"FBA 可售 {fba_days} 天")
+        if sellable_days is not None:
+            parts.append(f"可售天数 {sellable_days} 天")
         if suggest_qty is not None:
             parts.append(f"建议采购 {suggest_qty}")
         if parts:

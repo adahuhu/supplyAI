@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import asc, case, desc, func, or_, select
+from sqlalchemy import asc, case, desc, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from supplyai.models.mk import (
@@ -170,7 +170,7 @@ class SkuRepository:
         if sort_by == "stockout_date":
             return [order_fn(stat.stockout_date).nulls_last()]
         if sort_by == "fba_sellable_days":
-            return [order_fn(stat.fba_sellable_days).nulls_last()]
+            return [order_fn(stat.sellable_days).nulls_last()]
         if sort_by == "last_updated":
             return [order_fn(stat.updated_at)]
         return [priority_order.asc()]
@@ -388,6 +388,51 @@ class SkuRepository:
         filters = [inb.tenant_id == tenant_id, inb.msku == msku]
         if mall_id is not None:
             filters.append(inb.mall_id == mall_id)
+
+        bind = self._session.get_bind()
+        has_logistics_type = True
+        if bind.dialect.name == "sqlite":
+            columns = await self._session.execute(
+                text("PRAGMA table_info(mk_sku_inbound_detail)")
+            )
+            has_logistics_type = any(row[1] == "logistics_type" for row in columns.fetchall())
+        if not has_logistics_type:
+            # 兼容已存在的本地演示库:旧表没有 logistics_type 列。
+            result = await self._session.execute(
+                select(
+                    inb.inbound_id,
+                    inb.tenant_id,
+                    inb.mall_id,
+                    inb.msku,
+                    inb.sku,
+                    inb.inbound_type,
+                    inb.inbound_status,
+                    inb.qty,
+                    inb.expected_arrival_date,
+                    inb.source_order_no,
+                    inb.source_type,
+                )
+                .where(*filters)
+                .order_by(inb.expected_arrival_date.asc().nulls_last())
+            )
+            return [
+                MkSkuInboundDetail(
+                    inbound_id=row.inbound_id,
+                    tenant_id=row.tenant_id,
+                    mall_id=row.mall_id,
+                    msku=row.msku,
+                    sku=row.sku,
+                    inbound_type=row.inbound_type,
+                    inbound_status=row.inbound_status,
+                    logistics_type=None,
+                    qty=row.qty,
+                    expected_arrival_date=row.expected_arrival_date,
+                    source_order_no=row.source_order_no,
+                    source_type=row.source_type,
+                )
+                for row in result.all()
+            ]
+
         result = await self._session.execute(
             select(inb).where(*filters).order_by(inb.expected_arrival_date.asc().nulls_last())
         )

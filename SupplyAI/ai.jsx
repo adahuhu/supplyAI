@@ -19,7 +19,8 @@ function sanitizeAIVisibleText(value) {
     ['suggest_qty', '建议采购量'],
     ['suggest_amount', '建议采购金额'],
     ['coverage_demand', '覆盖周期需求'],
-    ['fba_sellable_days', 'FBA 可售天数'],
+    ['sellable_days', '可售天数'],
+    ['fba_sellable_days', '可售天数'],
     ['stockout_date', '预计断货日期'],
     ['purchase_date', '建议采购日期'],
     ['forecast_source', '预测来源'],
@@ -264,7 +265,7 @@ function extractRiskAdvice(text, fallbackSku) {
   const skuLine = text.match(/高风险 SKU[:：]\s*([^（(]+)[（(]([^)）]+)[)）]/);
   const compactSkuLine = text.match(/以\s*([A-Z0-9_-]+)\s*[（(]([A-Z]{2})[)）]\s*为例/);
   const anyMsku = text.match(/\bMS\d{4,}\b/);
-  const sellable = text.match(/FBA\s*(?:侧)?(?:库存)?\s*(?:可售)?\s*(?:仅能支撑|仅剩|仅)?\s*([\d.]+)\s*天/);
+  const sellable = text.match(/(?:FBA\s*(?:侧)?(?:库存)?\s*)?(?:可售天数|可售|仅能支撑|仅剩|仅)?\s*([\d.]+)\s*天/);
   const stockout = text.match(/预计(?:于)?\s*(?:([\d]{4}-\d{1,2}-\d{1,2})|(\d{1,2}\s*月\s*\d{1,2}\s*日))\s*(?:即)?(?:面临)?断货/);
   const suggestQty = text.match(/(?:建议(?:立即)?(?:采购|补货)|紧急补货|补货)\s*([\d,]+(?:\.\d+)?)\s*件/);
   const inbound = text.match(/(?:一批\s*)?([\d,]+(?:\.\d+)?)\s*件(?:的)?在途库存预计\s*([^，,。；;]+?)到货/);
@@ -283,7 +284,7 @@ function extractRiskAdvice(text, fallbackSku) {
   const skuMeta = fallbackSku || findSkuForAdvice({ msku, country: countryHint }) || {};
   const country = countryHint || skuMeta.country?.code || '';
 
-  const sellableDays = adviceNumber(sellable?.[1] ?? skuMeta.fbaSellable);
+  const sellableDays = adviceNumber(sellable?.[1] ?? skuMeta.sellableDays ?? skuMeta.sellable ?? skuMeta.fbaSellable);
   const stockoutAt = stockout ? (stockout[1] || stockout[2]) : adviceFormatDate(skuMeta.stockoutDate);
   const coverageDemand = adviceNumber(coverage?.[1] ?? skuMeta.coverageDemand);
   const currentTotalStock = adviceNumber(totalStock?.[1] ?? skuMeta.totalStock);
@@ -395,13 +396,13 @@ function AIDecisionCard({ text, sku, onAction, onCreatePlan }) {
           预计 {advice.stockoutAt} 断货，建议立即采购 {adviceFormatNum(advice.suggestQty)} 件
         </div>
         <div style={{ color: 'var(--text-3)', lineHeight: 1.55, marginTop: 5 }}>
-          FBA 可售仅 {adviceFormatFlexible(advice.sellableDays)} 天，需优先压缩运输时效。
+          可售天数仅 {adviceFormatFlexible(advice.sellableDays)} 天，需优先压缩运输时效。
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
         <div style={metricStyle}>
-          <div className="label">FBA 可售</div>
+          <div className="label">可售天数</div>
           <div className="kpi" style={metricValueStyle}>{adviceFormatFlexible(advice.sellableDays)}<span style={{ fontSize: 12, marginLeft: 3 }}>天</span></div>
         </div>
         <div style={metricStyle}>
@@ -456,7 +457,7 @@ function AIDecisionCard({ text, sku, onAction, onCreatePlan }) {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 600, marginBottom: 5 }}>原因</div>
           <ul style={{ margin: 0, paddingLeft: 17, color: 'var(--text-3)', lineHeight: 1.55, display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <li>FBA 库存只能支撑 {adviceFormatFlexible(advice.sellableDays)} 天，低于 P1 风险阈值。</li>
+            <li>当前参与库存只能支撑 {adviceFormatFlexible(advice.sellableDays)} 天，低于 P1 风险阈值。</li>
             {advice.inboundQty != null && advice.inboundQty > 0 && (
               <li>{advice.inboundAt ? `${adviceFormatNum(advice.inboundQty)} 件在途预计 ${advice.inboundAt} 到货，` : `${adviceFormatNum(advice.inboundQty)} 件在途，`}仍不能覆盖当前断货窗口。</li>
             )}
@@ -558,7 +559,7 @@ function SkuMiniRows({ rows, onSkuClick }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 74px 82px 86px', padding: '8px 10px', borderBottom: '1px solid var(--border)', color: 'var(--text-3)', fontSize: 11 }}>
         <div>SKU</div>
         <div>风险</div>
-        <div style={{ textAlign: 'right' }}>FBA 可售</div>
+        <div style={{ textAlign: 'right' }}>可售天数</div>
         <div style={{ textAlign: 'right' }}>建议采购</div>
       </div>
       {rows.map((s) => (
@@ -581,7 +582,7 @@ function SkuMiniRows({ rows, onSkuClick }) {
             <div style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name || s.sku}</div>
           </div>
           <PriorityBadge level={s.priority} compact/>
-          <div className="tabular" style={{ textAlign: 'right', fontSize: 12 }}>{adviceFormatFlexible(s.fbaSellable)} 天</div>
+          <div className="tabular" style={{ textAlign: 'right', fontSize: 12 }}>{adviceFormatFlexible(s.sellableDays ?? s.sellable ?? s.fbaSellable)} 天</div>
           <div className="tabular" style={{ textAlign: 'right', fontSize: 12, fontWeight: 650 }}>{s.suggest ? adviceFormatNum(s.suggestQty) : '—'}</div>
         </button>
       ))}
@@ -670,7 +671,7 @@ function SalesLeadersCard({ card, setRoute, openCreatePO, onClose }) {
           <div>SKU</div>
           <div style={{ textAlign: 'right' }}>近7天</div>
           <div style={{ textAlign: 'right' }}>预测日销</div>
-          <div style={{ textAlign: 'right' }}>FBA可售</div>
+          <div style={{ textAlign: 'right' }}>可售天数</div>
           <div>建议</div>
         </div>
         {(card.rows || []).map((s) => (
@@ -700,7 +701,7 @@ function SalesLeadersCard({ card, setRoute, openCreatePO, onClose }) {
             </div>
             <div className="tabular" style={{ textAlign: 'right', fontWeight: 700 }}>{adviceFormatNum(s.sales7d)}</div>
             <div className="tabular" style={{ textAlign: 'right' }}>{adviceFormatFlexible(s.futureDaily)}</div>
-            <div className="tabular" style={{ textAlign: 'right', color: Number(s.fbaSellable || 0) < 7 ? 'var(--p1)' : 'inherit' }}>{adviceFormatFlexible(s.fbaSellable)} 天</div>
+            <div className="tabular" style={{ textAlign: 'right', color: Number((s.sellableDays ?? s.sellable ?? s.fbaSellable) || 0) < 7 ? 'var(--p1)' : 'inherit' }}>{adviceFormatFlexible(s.sellableDays ?? s.sellable ?? s.fbaSellable)} 天</div>
             <div style={{ color: s.recommendation === '优先加码' || s.recommendation === '重点推广' ? 'var(--p3)' : 'var(--p2)', fontWeight: 650 }}>{s.recommendation}</div>
           </button>
         ))}
@@ -1502,7 +1503,7 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
           <ProductImage label={sku.msku.slice(-3)} size={36}/>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sku.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>FBA 可售 {sku.fbaSellable}d · 建议采购 {sku.suggestQty}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>可售天数 {sku.sellable}d · 建议采购 {sku.suggestQty}</div>
           </div>
           <PriorityBadge level={sku.priority}/>
         </div>

@@ -553,7 +553,7 @@ class DashboardRepository:
             .order_by(
                 priority_order.asc(),
                 stat.stockout_date.asc().nulls_last(),
-                stat.fba_sellable_days.asc().nulls_last(),
+                stat.sellable_days.asc().nulls_last(),
             )
             .limit(limit)
         )

@@ -148,7 +148,7 @@ class SmartDecisionService:
         if card_type == "risk_queue":
             rc = card.get("riskCounts", {})
             rows_desc = "; ".join(
-                f'{r["msku"]}({r.get("priority","?")}, 可售{r.get("fbaSellable","?")}天, 建议采购{r.get("suggestQty","?")}件)'
+                f'{r["msku"]}({r.get("priority","?")}, 可售{r.get("sellableDays", r.get("fbaSellable","?"))}天, 建议采购{r.get("suggestQty","?")}件)'
                 for r in card.get("rows", [])[:6]
             )
             return (

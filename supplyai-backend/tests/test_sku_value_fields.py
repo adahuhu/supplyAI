@@ -16,14 +16,14 @@ async def test_summary_includes_value_fields(client: AsyncClient) -> None:
 
 
 async def test_loss_only_for_short_sellable_days(client: AsyncClient) -> None:
-    """fba_sellable_days <= 7 的行应该有正的 expected_loss_revenue_7d.
+    """备货列表可售天数 <= 7 的行应该有正的 expected_loss_revenue_7d.
     > 7 的应当 = 0 (7 天内不会断货)."""
     resp = await client.post(
         "/api/supplyai/skus/list",
         json={"tenant_id": 100228, "page_size": 48},
     )
     for row in resp.json()["rows"]:
-        days = row.get("fba_sellable_days")
+        days = row.get("sellable_days")
         loss = row.get("expected_loss_revenue_7d") or 0
         if days is None or days > 7:
             assert loss == 0, (

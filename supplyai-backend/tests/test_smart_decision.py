@@ -248,7 +248,7 @@ class TestStream:
         full_text = "".join(e.get("text", "") for e in events if e["type"] == "delta")
         assert "503" not in full_text
         assert "建议采购" in full_text
-        assert "FBA 可售" in full_text
+        assert "可售天数" in full_text
         done = next(e for e in events if e["type"] == "done")
         assert done.get("status") == "degraded"
 

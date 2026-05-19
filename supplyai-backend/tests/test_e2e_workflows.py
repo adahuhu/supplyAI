@@ -500,10 +500,10 @@ class TestEpic6DataConsistency:
                 f"expected={expected} (cov={cov}, stock={stock})"
             )
 
-    async def test_us_6_3_risk_level_aligned_with_fba_sellable_days(
+    async def test_us_6_3_risk_level_aligned_with_sellable_days(
         self, client: AsyncClient
     ) -> None:
-        """US-6.3: 风险等级与 fba_sellable_days 阈值一致.
+        """US-6.3: 风险等级与备货列表可售天数阈值一致.
 
         p1 ≤ 7 / p2 8-15 / p3 16-30 / safe > 30
         """
@@ -512,7 +512,7 @@ class TestEpic6DataConsistency:
             json={"tenant_id": TENANT_ID, "page_size": 48},
         )
         for r in listed.json()["rows"]:
-            d = r.get("fba_sellable_days")
+            d = r.get("sellable_days")
             if d is None:
                 assert r["priority"] == "safe"
             elif d <= 7:

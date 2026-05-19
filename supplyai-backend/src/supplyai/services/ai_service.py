@@ -58,7 +58,8 @@ def _sku_card_row(s: SkuSummaryDTO) -> dict:
         "store": s.store_name,
         "country": {"code": s.country_code} if s.country_code else None,
         "priority": s.priority,
-        "fbaSellable": s.fba_sellable_days,
+        "sellableDays": s.sellable_days,
+        "fbaSellable": s.sellable_days,
         "stockoutDate": s.stockout_date.isoformat() if s.stockout_date else None,
         "suggest": s.suggest,
         "suggestQty": s.suggest_qty,
@@ -77,12 +78,12 @@ def _sku_card_row(s: SkuSummaryDTO) -> dict:
 def _sales_leader_row(s: SkuSummaryDTO, score: float) -> dict:
     sales_7d = int(s.sales_7d or 0)
     future_daily = float(s.future_daily or 0)
-    fba_days = float(s.fba_sellable_days or 0)
+    sellable_days = float(s.sellable_days or 0)
     margin = float(s.gross_margin or 0)
     suggest_qty = int(s.suggest_qty or 0)
     risks: list[str] = []
-    if fba_days < 7:
-        risks.append(f"FBA 可售仅 {fba_days:.2f} 天")
+    if sellable_days < 7:
+        risks.append(f"可售天数仅 {sellable_days:.2f} 天")
     if suggest_qty > 0:
         risks.append(f"需补 {suggest_qty} 件")
     if margin < 0:
@@ -91,7 +92,7 @@ def _sales_leader_row(s: SkuSummaryDTO, score: float) -> dict:
         risks.append("库存可支撑继续放量")
 
     recommendation = "重点推广"
-    if fba_days < 7:
+    if sellable_days < 7:
         recommendation = "先补货再推广"
     elif margin < 0:
         recommendation = "谨慎推广,先复核成本"
@@ -110,7 +111,7 @@ def _sales_leader_row(s: SkuSummaryDTO, score: float) -> dict:
             "reasons": [
                 f"近 7 天销量 {sales_7d} 件",
                 f"预测日销 {future_daily:.2f} 件",
-                f"FBA 可售 {fba_days:.2f} 天",
+                f"可售天数 {sellable_days:.2f} 天",
                 *risks[:2],
             ],
         }
@@ -147,13 +148,15 @@ def _rule_impact_row(s: SkuSummaryDTO, *, target_safety_days: int) -> dict:
     current_safety = int(s.safety_days or 14)
     lead = int(s.lead_time_days or 0)
     daily = float(s.future_daily or 0)
-    total_stock = int(s.total_stock or 0)
+    planning_stock = int(
+        s.planning_stock if s.planning_stock is not None else (s.fba_available or 0)
+    )
     current_suggest = int(s.suggest_qty or 0)
     next_coverage = daily * (lead + target_safety_days)
     next_suggest = (
         current_suggest
         if current_safety == target_safety_days
-        else math.ceil(max(0, next_coverage - total_stock))
+        else math.ceil(max(0, next_coverage - planning_stock))
     )
     row = _sku_card_row(s)
     row.update(
@@ -173,8 +176,11 @@ def _degraded_explanation(ctx: dict) -> str:
     parts = [
         f"[降级模式] SKU {ctx.get('msku')} 风险等级 {ctx.get('priority', 'unknown')}。"
     ]
-    if ctx.get("fba_sellable_days") is not None:
-        parts.append(f"FBA 可售 {ctx['fba_sellable_days']} 天。")
+    sellable_days = ctx.get("sellable_days")
+    if sellable_days is None:
+        sellable_days = ctx.get("fba_sellable_days")
+    if sellable_days is not None:
+        parts.append(f"可售天数 {sellable_days} 天。")
     if ctx.get("suggest_qty"):
         amt = ctx.get("suggest_amount_base")
         cur = ctx.get("base_currency") or "USD"
@@ -216,7 +222,7 @@ def _local_sku_chat_text(question: str, dto: SkuSummaryDTO) -> str:
     purchase_date = _fmt_date(dto.purchase_date)
     stockout_date = _fmt_date(dto.stockout_date)
     suggest_qty = int(dto.suggest_qty or 0)
-    fba_days = _fmt_num(dto.fba_sellable_days)
+    sellable_days = _fmt_num(dto.sellable_days)
     planning_stock = dto.planning_stock if dto.planning_stock is not None else dto.fba_available
     coverage = _fmt_num(dto.coverage_demand)
     future_daily = _fmt_num(dto.future_daily)
@@ -225,19 +231,19 @@ def _local_sku_chat_text(question: str, dto: SkuSummaryDTO) -> str:
         if dto.suggest and dto.purchase_date:
             return (
                 f"{title} 的建议采购时间是 {purchase_date},建议采购 {suggest_qty} 件。\n"
-                f"依据是:FBA 可售约 {fba_days} 天,预计断货日 {stockout_date};"
+                f"依据是:可售天数约 {sellable_days} 天,预计断货日 {stockout_date};"
                 f"覆盖周期需求 {coverage} 件,当前参与库存 {planning_stock or 0} 件。"
             )
         return (
             f"{title} 当前暂未生成新的采购时间。"
-            f"当前 FBA 可售约 {fba_days} 天,预计断货日 {stockout_date},"
+            f"当前可售天数约 {sellable_days} 天,预计断货日 {stockout_date},"
             f"系统建议采购量为 {suggest_qty} 件。"
         )
 
     if re.search(r"为什么|原因|怎么来|依据|因素", q):
         return (
             f"{title} 当前风险等级为 {(dto.priority or '').upper()},核心原因是 "
-            f"FBA 可售约 {fba_days} 天、预测日销 {future_daily} 件、"
+            f"可售天数约 {sellable_days} 天、预测日销 {future_daily} 件、"
             f"参与库存 {planning_stock or 0} 件,覆盖周期需求 {coverage} 件。"
             f"因此系统给出的建议采购量是 {suggest_qty} 件。"
         )
@@ -250,7 +256,7 @@ def _local_sku_chat_text(question: str, dto: SkuSummaryDTO) -> str:
         )
 
     return (
-        f"{title} 当前 FBA 可售约 {fba_days} 天,预计断货日 {stockout_date},"
+        f"{title} 当前可售天数约 {sellable_days} 天,预计断货日 {stockout_date},"
         f"建议采购时间 {purchase_date},建议采购 {suggest_qty} 件。"
         "以上来自当前 SKU 备货快照。"
     )
@@ -288,7 +294,8 @@ class AiService:
             "asin": dto.asin,
             "store_name": dto.store_name,
             "priority": dto.priority,
-            "fba_sellable_days": dto.fba_sellable_days,
+            "fba_sellable_days": dto.sellable_days,
+            "sellable_days": dto.sellable_days,
             "stockout_date": dto.stockout_date.isoformat() if dto.stockout_date else None,
             "suggest_qty": dto.suggest_qty,
             "suggest_amount_base": dto.suggest_amount_base,
@@ -567,6 +574,7 @@ class AiService:
                 "store": r.store_name,
                 "country": {"code": r.country_code} if r.country_code else None,
                 "priority": r.priority,
+                "sellableDays": r.fba_sellable_days,
                 "fbaSellable": r.fba_sellable_days,
                 "stockoutDate": r.stockout_date.isoformat() if r.stockout_date else None,
                 "suggest": r.suggest_qty > 0,
@@ -632,9 +640,9 @@ class AiService:
         for s in candidates:
             sales_7d = float(s.sales_7d or 0)
             future_daily = float(s.future_daily or 0)
-            fba_days = float(s.fba_sellable_days or 0)
+            sellable_days = float(s.sellable_days or 0)
             margin = float(s.gross_margin or 0)
-            stock_penalty = 0.65 if fba_days < 7 else 0.85 if fba_days < 15 else 1.0
+            stock_penalty = 0.65 if sellable_days < 7 else 0.85 if sellable_days < 15 else 1.0
             margin_bonus = 1.12 if margin >= 0.2 else 1.0 if margin >= 0 else 0.65
             score = (sales_7d * 0.65 + future_daily * 7 * 0.35) * stock_penalty * margin_bonus
             scored.append((score, s))
@@ -667,7 +675,7 @@ class AiService:
             ],
             "evidence": [
                 {"label": "排序口径", "value": "近7天销量 + 预测日销 + 库存 + 毛利"},
-                {"label": "库存约束", "value": "FBA 可售不足 7 天不直接加码"},
+                {"label": "库存约束", "value": "可售天数不足 7 天不直接加码"},
                 {"label": "推荐原则", "value": "热卖且库存健康优先,高风险先补货"},
             ],
             "rows": rows,
@@ -802,7 +810,7 @@ class AiService:
         if qty <= 0:
             qty = max(1, math.ceil(float(summary.coverage_demand or 0) - float(summary.total_stock or 0)))
         unit_cost = float(summary.suggest_amount_base or 0) / qty if qty > 0 and summary.suggest_amount_base else 0.0
-        sellable_days = float(summary.fba_sellable_days or 0)
+        sellable_days = float(summary.sellable_days or 0)
         fastest_days = min(int(m.logistics_days) for m in methods)
         options = []
         for m in sorted(methods, key=lambda x: (x.logistics_days, x.logistics_mode)):
@@ -840,7 +848,7 @@ class AiService:
                 {"label": "建议采购", "value": qty, "unit": "件"},
             ],
             "evidence": [
-                {"label": "FBA 可售", "value": f"{sellable_days:.2f} 天"},
+                {"label": "可售天数", "value": f"{sellable_days:.2f} 天"},
                 {"label": "预计断货", "value": summary.stockout_date.isoformat() if summary.stockout_date else "—"},
                 {"label": "当前总库存", "value": f"{summary.total_stock or 0} 件"},
                 {"label": "覆盖需求", "value": f"{float(summary.coverage_demand or 0):.2f} 件"},
@@ -945,15 +953,27 @@ class AiService:
             s = page.rows[0]
 
         content = (
-            f"该 SKU 处于 {s.priority.upper()} 风险，FBA 可售仅 {float(s.fba_sellable_days or 0):.2f} 天，"
+            f"该 SKU 处于 {s.priority.upper()} 风险，可售天数仅 {float(s.sellable_days or 0):.2f} 天，"
             f"预计于 {s.stockout_date.isoformat() if s.stockout_date else '—'} 断货。\n"
-            f"基于全链路库存计算，建议采购 {int(s.suggest_qty or 0)} 件以覆盖 "
+            f"基于备货列表同一库存口径计算，建议采购 {int(s.suggest_qty or 0)} 件以覆盖 "
             f"{float(s.coverage_demand or 0):.2f} 件的覆盖周期需求。\n"
             f"请在前端确认采购计划：SKU {s.msku}，数量 {int(s.suggest_qty or 0)} 件，供应商待补充。"
         )
         return DecisionCardResponse(
             content=content,
             scenario=req.scenario,
-            card={"type": "risk_advice", "source": "backend", "calcRunId": s.calc_run_id},
+            card={
+                "type": "risk_advice",
+                "source": "backend",
+                "calcRunId": s.calc_run_id,
+                "sku": {
+                    "listingId": s.listing_id,
+                    "msku": s.msku,
+                    "priority": s.priority,
+                    "sellableDays": s.sellable_days,
+                    "stockoutDate": s.stockout_date.isoformat() if s.stockout_date else None,
+                    "suggestQty": s.suggest_qty,
+                },
+            },
             calc_run_id=s.calc_run_id,
         )

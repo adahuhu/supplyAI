@@ -3,7 +3,7 @@
 技术方案 §7.5 要求 AI 不能"自由发挥",必须遵守:
   1. 口径锁定到同一系统快照,不跨快照混用数据。
   2. 不重新计算建议采购量 / 可售天数 / 断货日期,只解释。
-  3. 预计断货 = FBA 侧;采购时间 = 全链路总库存口径。
+  3. 预计断货 / 可售天数 / 风险等级均使用备货列表同一规则库存口径。
   4. 缺失值 / 估算 / 多币种必须显式说明。
   5. 采购草稿动作必须二次确认 SKU、数量、供应商三项,不能仅凭自然语言落库。
 """
@@ -21,10 +21,10 @@ SYSTEM_PROMPT = """\
 【硬约束 — 不可违反】
 1. 口径锁定:所有引用的数字必须来自同一个系统快照,不允许跨批次混用。
 2. 不重算:你只解释系统已经计算好的建议采购量、覆盖周期需求、
-   FBA 可售天数、断货日期等结果,绝不自行计算建议采购量、可售天数、断货日期。
+   可售天数、断货日期等结果,绝不自行计算建议采购量、可售天数、断货日期。
 3. 口径区分:
-   - 预计断货时间使用 FBA 侧库存。
-   - 建议采购时间和建议采购量使用全链路总库存。
+   - 可售天数使用规则配置后的参与库存。
+   - 建议采购时间和建议采购量使用同一规则库存口径。
 4. 显式声明缺失:任何字段为 None / 估算 / 多币种折算时,必须在回答里说明
    (例如"单位成本缺失,采购金额未折算")。
 5. 采购草稿动作:涉及生成采购草稿时,必须先在回答中列出 SKU、数量、供应商三项,
@@ -33,10 +33,10 @@ SYSTEM_PROMPT = """\
    请把所有技术字段、内部编号、下划线命名的信息全部改用业务术语。
 
 【风险等级阈值】
-   p1: FBA 可售 ≤ 7 天 (紧急)
-   p2: FBA 可售 8-15 天 (关注)
-   p3: FBA 可售 16-30 天 (计划)
-   safe: FBA 可售 > 30 天
+   p1: 可售天数 ≤ 7 天 (紧急)
+   p2: 可售天数 8-15 天 (关注)
+   p3: 可售天数 16-30 天 (计划)
+   safe: 可售天数 > 30 天
 
 输出格式要求:中文,简洁,2-4 句结论 + 关键数字带单位。"""
 
@@ -57,7 +57,7 @@ def build_explain_prompt(dto: Any, *, calc_run_id: str) -> str:
         f"  ASIN={_v(getattr(dto, 'asin', None))}\n"
         f"  店铺={_v(getattr(dto, 'store_name', None))}\n"
         f"  风险等级={_v(getattr(dto, 'priority', None))}\n"
-        f"  FBA 可售天数={_v(getattr(dto, 'fba_sellable_days', None))}\n"
+        f"  可售天数={_v(getattr(dto, 'sellable_days', None))}\n"
         f"  总库存={_v(getattr(dto, 'total_stock', None))}\n"
         f"  覆盖周期需求={_v(getattr(dto, 'coverage_demand', None))}\n"
         f"  预测来源={_v(getattr(dto, 'forecast_source', None))}\n"
@@ -86,7 +86,8 @@ _VISIBLE_TERM_REPLACEMENTS = {
     "suggest_qty": "建议采购量",
     "suggest_amount": "建议采购金额",
     "coverage_demand": "覆盖周期需求",
-    "fba_sellable_days": "FBA 可售天数",
+    "sellable_days": "可售天数",
+    "fba_sellable_days": "可售天数",
     "stockout_date": "预计断货日期",
     "purchase_date": "建议采购日期",
     "forecast_source": "预测来源",
@@ -109,7 +110,7 @@ def sanitize_user_ai_text(text: str | None) -> str:
 
 
 # 决定 status 用的关键字段
-_KEY_FIELDS = ("fba_sellable_days", "suggest_qty", "stockout_date")
+_KEY_FIELDS = ("sellable_days", "suggest_qty", "stockout_date")
 
 
 def classify_status(sku_ctx: dict[str, Any], *, ai_available: bool) -> AiStatus:

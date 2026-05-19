@@ -76,6 +76,7 @@
     const stockScope = Array.isArray(row.stock_scope) && row.stock_scope.length
       ? row.stock_scope
       : ['fba_available'];
+    const standardSellableDays = row.sellable_days != null ? +(+row.sellable_days).toFixed(2) : 0;
     return {
       // 标识 — id 用 String(listing_id) 保持路由兼容
       id: String(row.id),
@@ -116,8 +117,9 @@
       planningStock: row.planning_stock ?? row.fba_available ?? 0,
       stockScope,
       stockScopeLabel: stockScopeLabel(stockScope),
-      sellable: row.sellable_days != null ? +(+row.sellable_days).toFixed(2) : 0,
-      fbaSellable: row.fba_sellable_days != null ? +(+row.fba_sellable_days).toFixed(2) : 0,
+      sellable: standardSellableDays,
+      sellableDays: standardSellableDays,
+      fbaSellable: standardSellableDays,
       localSellable: row.local_sellable_days != null ? +(+row.local_sellable_days).toFixed(2) : 0,
 
       // 时效 / 建议

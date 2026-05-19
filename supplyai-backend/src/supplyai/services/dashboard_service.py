@@ -369,7 +369,7 @@ def _build_queue_row(
         store_name=store_name,
         country_code=stat.country_code,
         priority=stat.risk_level,  # type: ignore[arg-type]
-        fba_sellable_days=_to_float(stat.fba_sellable_days),
+        fba_sellable_days=_to_float(stat.sellable_days),
         stockout_date=stat.stockout_date,
         suggest_qty=stat.suggest_qty,
         suggest_amount_base=_to_float(stat.suggest_amount_base),

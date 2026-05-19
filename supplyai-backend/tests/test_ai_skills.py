@@ -3,7 +3,7 @@
 约束(技术方案 §7.5):
   - AI 只解释系统已计算结果,不重算建议采购量 / 可售天数
   - 口径锁定到同一系统快照
-  - 预计断货 = FBA 侧;采购时间 = 全链路
+  - 预计断货 / 可售天数 = 备货列表规则库存口径
   - 缺失值 / 估算 / 多币种必须显式说明
   - 采购草稿动作必须二次确认 SKU/数量/供应商
 
@@ -42,9 +42,9 @@ def test_system_prompt_includes_no_recompute_constraint() -> None:
     assert "suggest_qty" in SYSTEM_PROMPT or "建议采购量" in SYSTEM_PROMPT
 
 
-def test_system_prompt_includes_fba_vs_total_caliber() -> None:
-    """预计断货 = FBA 口径;采购时间 = 全链路口径."""
-    assert "FBA" in SYSTEM_PROMPT
+def test_system_prompt_includes_replenishment_list_caliber() -> None:
+    """预计断货 = 备货列表规则库存口径."""
+    assert "规则" in SYSTEM_PROMPT or "备货列表" in SYSTEM_PROMPT
     assert "断货" in SYSTEM_PROMPT
 
 
@@ -67,6 +67,7 @@ class _FakeDto:
     asin = "B000000048"
     store_name = "Sakura-JP01"
     priority = "p1"
+    sellable_days = 1.99
     fba_sellable_days = 1.99
     suggest_qty = 923
     suggest_amount_base = 36.61
@@ -93,6 +94,7 @@ def test_explain_prompt_marks_missing_fields() -> None:
         asin = None
         store_name = None
         priority = "safe"
+        sellable_days = None
         fba_sellable_days = None
         suggest_qty = 0
         suggest_amount_base = None
@@ -120,7 +122,7 @@ def test_sanitize_user_ai_text_hides_internal_names() -> None:
 
 def test_status_ok_when_all_present() -> None:
     sku_ctx = {
-        "fba_sellable_days": 5.0,
+        "sellable_days": 5.0,
         "suggest_qty": 100,
         "stockout_date": "2026-05-15",
     }
@@ -129,7 +131,7 @@ def test_status_ok_when_all_present() -> None:
 
 def test_status_partial_when_field_missing() -> None:
     sku_ctx = {
-        "fba_sellable_days": None,
+        "sellable_days": None,
         "suggest_qty": 0,
         "stockout_date": None,
     }
@@ -138,7 +140,7 @@ def test_status_partial_when_field_missing() -> None:
 
 def test_status_degraded_when_ai_unavailable() -> None:
     sku_ctx = {
-        "fba_sellable_days": 5.0,
+        "sellable_days": 5.0,
         "suggest_qty": 100,
         "stockout_date": "2026-05-15",
     }

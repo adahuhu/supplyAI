@@ -58,6 +58,42 @@ const LIST_SORT_ACCESSORS = {
   lastUpdated: s => s.lastUpdated ? s.lastUpdated.getTime() : null,
 };
 
+const LIST_SORT_LABELS = {
+  product: '商品',
+  sku: 'SKU',
+  tags: '标签',
+  store: '店铺/国家',
+  status: '状态',
+  priority: '风险',
+  sales7d: '近 7 天销量',
+  futureDaily: '预测日销',
+  revenue7: '收入',
+  expense7: '支出',
+  cost7: '成本',
+  grossProfit7: '毛利润',
+  grossMargin: '毛利率',
+  fbaAvail: 'FBA 可用',
+  fbaInTransit: 'FBA 在途',
+  localTotal: '本地实际',
+  localPlan: '本地预计',
+  totalStock: '总库存',
+  sellable: '可售天数',
+  stockoutDate: '预计断货',
+  lastShipmentAt: '上次发货',
+  lastPurchaseAt: '上次采购',
+  purchaseLeadTime: '采购时效',
+  suggest: '建议采购',
+  suggestQty: '建议采购量',
+  purchaseDate: '建议采购时间',
+  lastUpdated: '最后更新',
+};
+
+function listSortLabel(sort) {
+  const key = LIST_SORT_LABELS[sort?.key] || sort?.key || '风险';
+  const dir = sort?.dir === 'desc' ? '降序' : '升序';
+  return `${key} ${dir}`;
+}
+
 function isStockout7Sku(s) {
   if (s && Array.isArray(s.fbaAvailable7) && s.fbaAvailable7.length >= 7) {
     return s.fbaAvailable7.slice(-7).every(v => Number(v || 0) <= 0);
@@ -821,7 +857,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
         <span>·</span>
 	        <span>已选 {selected.size}</span>
 	        <span>·</span>
-	        <span>当前排序：{sort.key} {sort.dir === 'asc' ? '升序' : '降序'}</span>
+	        <span>当前排序：{listSortLabel(sort)}</span>
 	        <div style={{ flex: 1 }} />
         <span>每页</span>
         <select className="sel" style={{ height: 26, padding: '0 8px' }}><option>50</option><option>100</option></select>
@@ -993,16 +1029,16 @@ function recalcSkuForecastList(sku, nextDaily) {
   sku.coverageDemand = +(sku.totalCoverage * daily).toFixed(2);
   const planningStock = sku.planningStock ?? sku.fbaAvail ?? 0;
   sku.sellable = daily > 0 ? +(planningStock / daily).toFixed(2) : 0;
-  sku.fbaSellable = daily > 0 ? +((sku.fbaAvail + sku.fbaInTransit) / daily).toFixed(2) : 0;
+  sku.fbaSellable = sku.sellable;
   sku.localSellable = daily > 0 ? +((sku.localTotal || 0) / daily).toFixed(2) : 0;
   sku.suggestQty = Math.max(0, Math.ceil(sku.coverageDemand - planningStock));
   sku.suggest = sku.suggestQty > 0;
   const asOf = DASH_STATS.asOf || new Date();
-  sku.stockoutDate = daily > 0 ? dateAddList(asOf, sku.fbaSellable) : null;
+  sku.stockoutDate = daily > 0 ? dateAddList(asOf, sku.sellable) : null;
   sku.purchaseDate = sku.stockoutDate ? dateAddList(sku.stockoutDate, -(sku.purchaseLeadTime || 0)) : null;
-  sku.priority = sku.fbaSellable <= 7 ? 'p1'
-    : sku.fbaSellable <= 15 ? 'p2'
-    : sku.fbaSellable <= 30 ? 'p3'
+  sku.priority = sku.sellable <= 7 ? 'p1'
+    : sku.sellable <= 15 ? 'p2'
+    : sku.sellable <= 30 ? 'p3'
     : 'safe';
   sku.lastUpdated = new Date();
 }
@@ -1354,7 +1390,7 @@ function RiskCellWithTip({ level }) {
           textAlign: 'left',
           display: 'flex', flexDirection: 'column', gap: 4,
         }}>
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4, fontWeight: 500 }}>风险等级（按 FBA 可售天数）</div>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4, fontWeight: 500 }}>风险等级（按可售天数）</div>
           {[
             ['p1', 'P1 紧急', '7 天内断货'],
             ['p2', 'P2 重要', '15 天内断货'],

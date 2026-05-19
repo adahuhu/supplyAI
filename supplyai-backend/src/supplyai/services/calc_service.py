@@ -41,6 +41,8 @@ HISTORY_DAYS = 90
 HORIZON_DAYS = 45
 MIN_HOLIDAY_MULTIPLIER = 0.3
 MAX_HOLIDAY_MULTIPLIER = 4.0
+MONEY_QUANT = Decimal("0.01")
+MARGIN_QUANT = Decimal("0.0001")
 
 
 class NoListingsException(BusinessException):
@@ -228,8 +230,9 @@ class CalcService:
         )
 
         # 5. 风险 + 断货日
-        priority = classify_risk(fba_sellable_days=fsd)
-        stockout_date = compute_stockout_date(today=today, fba_sellable_days=fsd)
+        # 与备货列表的"可售天数"保持同一口径:按规则配置后的参与库存计算。
+        priority = classify_risk(fba_sellable_days=sd)
+        stockout_date = compute_stockout_date(today=today, fba_sellable_days=sd)
 
         # 6. Suggest
         sug = compute_suggest(
@@ -252,6 +255,10 @@ class CalcService:
         sales_30d = sum(int(r.sales_volume or 0) for r in history_rows[-30:])
         sales_60d = sum(int(r.sales_volume or 0) for r in history_rows[-60:])
         sales_90d = sum(int(r.sales_volume or 0) for r in history_rows)
+        revenue_7d, expense_7d, cost_7d, gross_profit_7d, gross_margin = (
+            _estimate_financials(lp=lp, sales_7d=sales_7d)
+        )
+        yesterday_sales = int(history_rows[-1].sales_volume or 0) if history_rows else 0
 
         snap = MkSupplySkuDailyStat(
             calc_run_id=run.calc_run_id,
@@ -269,9 +276,13 @@ class CalcService:
             listing_status=lp.listing_status,
             delivery_method=lp.delivery_method,
             risk_level=priority,
-            yesterday_sales=int(history_rows[-1].sales_volume or 0)
-            if history_rows
-            else 0,
+            yesterday_sales=yesterday_sales,
+            yesterday_revenue=_money(Decimal(yesterday_sales) * (lp.sale_price or 0)),
+            revenue_7d=revenue_7d,
+            expense_7d=expense_7d,
+            cost_7d=cost_7d,
+            gross_profit_7d=gross_profit_7d,
+            gross_margin=gross_margin,
             sales_7d=sales_7d,
             sales_30d=sales_30d,
             sales_60d=sales_60d,
@@ -311,7 +322,7 @@ class CalcService:
             suggest_amount_base=Decimal(str(round(sug.suggest_amount_base, 2)))
             if sug.suggest_amount_base is not None
             else None,
-            financial_estimate_type="hidden",  # Phase 1 财务派生未接入
+            financial_estimate_type="allocated",
             source_type="derived",
         )
 
@@ -332,6 +343,43 @@ class CalcService:
             for p in fc.series
         ]
         return snap, forecast_rows
+
+
+def _money(value: Decimal | int | float | None) -> Decimal:
+    """金额统一保留 2 位,供演示财务 mock 与列表展示使用."""
+    return Decimal(value or 0).quantize(MONEY_QUANT)
+
+
+def _estimate_financials(
+    *, lp: MkListingProductSources, sales_7d: int
+) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal]:
+    """生成确定性的 SKU 级财务 mock.
+
+    收入来自近 7 天销量 × 售价;成本来自近 7 天销量 × 采购单价;
+    支出模拟平台佣金、FBA 配送、广告和仓储分摊,按 listing/tag 做轻微差异,
+    保证每次重算后备货列表仍有可解释的财务数据。
+    """
+    revenue = _money(Decimal(sales_7d) * (lp.sale_price or 0))
+    cost = _money(Decimal(sales_7d) * (lp.unit_cost or 0))
+    if revenue <= 0:
+        return revenue, Decimal("0.00"), cost, Decimal("0.00"), Decimal("0.0000")
+
+    label_text = str(lp.label_ids or "")
+    rate = Decimal("0.43") + Decimal((lp.listing_id or 0) % 7) * Decimal("0.012")
+    if "大促" in label_text or "广告款" in label_text:
+        rate += Decimal("0.035")
+    if "新品" in label_text:
+        rate += Decimal("0.025")
+    if "清仓" in label_text:
+        rate += Decimal("0.045")
+    if "高毛利" in label_text:
+        rate -= Decimal("0.025")
+    rate = min(max(rate, Decimal("0.38")), Decimal("0.58"))
+
+    expense = _money(revenue * rate)
+    gross_profit = _money(revenue - cost - expense)
+    gross_margin = (gross_profit / revenue).quantize(MARGIN_QUANT)
+    return revenue, expense, cost, gross_profit, gross_margin
 
 
 def build_holiday_multipliers(

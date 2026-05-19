@@ -152,10 +152,39 @@ async def test_calc_run_preserves_sku_tags(
     assert all("新品" in row["tags"] for row in rows)
 
 
-async def test_calc_run_risk_level_matches_fba_sellable_days(
+async def test_calc_run_generates_financial_mock_fields(
     client: AsyncClient,
 ) -> None:
-    """随机抽 SKU 验证 risk_level 与 fba_sellable_days 阈值一致."""
+    """重算后的备货列表仍应有收入/支出/成本/毛利润/毛利率 mock 数据."""
+    run_resp = await client.post(
+        "/api/supplyai/calc/run", json={"tenant_id": 100228}
+    )
+    new_id = run_resp.json()["calc_run_id"]
+
+    list_resp = await client.post(
+        "/api/supplyai/skus/list",
+        json={"tenant_id": 100228, "calc_run_id": new_id, "page_size": 20},
+    )
+    assert list_resp.status_code == 200
+    rows = list_resp.json()["rows"]
+    assert rows
+    for row in rows:
+        assert row["financial_estimate_type"] == "allocated"
+        for field in (
+            "revenue_7d",
+            "expense_7d",
+            "cost_7d",
+            "gross_profit_7d",
+            "gross_margin",
+        ):
+            assert row[field] is not None, f"{row['msku']} missing {field}"
+        assert row["revenue_7d"] > 0
+
+
+async def test_calc_run_risk_level_matches_sellable_days(
+    client: AsyncClient,
+) -> None:
+    """随机抽 SKU 验证 risk_level 与备货列表可售天数阈值一致."""
     run_resp = await client.post(
         "/api/supplyai/calc/run", json={"tenant_id": 100228}
     )
@@ -166,7 +195,7 @@ async def test_calc_run_risk_level_matches_fba_sellable_days(
         json={"tenant_id": 100228, "calc_run_id": new_id, "page_size": 48},
     )
     for row in list_resp.json()["rows"]:
-        days = row.get("fba_sellable_days")
+        days = row.get("sellable_days")
         prio = row["priority"]
         if days is None:
             assert prio == "safe"
