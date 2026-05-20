@@ -229,6 +229,12 @@
     exportSkuList(opts = {}) {
       return postJson('/exports/sku-list', { tenant_id: TENANT_ID, ...opts });
     },
+    notificationPreview(opts = {}) {
+      return postJson('/notifications/dingtalk/preview', { tenant_id: TENANT_ID, ...opts });
+    },
+    notificationSend(opts = {}) {
+      return postJson('/notifications/dingtalk/send', { tenant_id: TENANT_ID, ...opts });
+    },
   };
 
   window.api = api;

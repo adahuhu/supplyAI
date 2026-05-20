@@ -110,6 +110,20 @@ class Settings(BaseSettings):
     export_dir: str = "./data/exports"
     export_sync_threshold: int = 5000  # 行数 ≤ 此值同步生成,否则异步
 
+    # ===== 钉钉日报推送 =====
+    dingtalk_webhook_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SUPPLY_DINGTALK_WEBHOOK_URL", "dingtalk_webhook_url"),
+    )
+    dingtalk_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SUPPLY_DINGTALK_SECRET", "dingtalk_secret"),
+    )
+    public_app_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SUPPLY_PUBLIC_APP_URL", "public_app_url"),
+    )
+
     @property
     def is_local(self) -> bool:
         return self.app_env == "local"

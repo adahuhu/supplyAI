@@ -6,6 +6,7 @@ function Sidebar({ route, setRoute, collapsed }) {
     { id: 'list', label: '备货计划', icon: 'list' },
     { id: 'sku', label: 'SKU 分析', icon: 'box' },
     { id: 'drafts', label: '采购计划', icon: 'package' },
+    { id: 'notifications', label: '钉钉推送', icon: 'bell' },
   ];
   return (
     <aside style={{

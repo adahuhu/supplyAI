@@ -92,6 +92,10 @@ _VISIBLE_TERM_REPLACEMENTS = {
     "purchase_date": "建议采购日期",
     "forecast_source": "预测来源",
     "unit_cost": "单位成本",
+    "risk_level": "风险等级",
+    "immediate": "紧急",
+    "urgent": "紧急",
+    "safe": "安全",
 }
 
 _INTERNAL_NAME_PATTERN = re.compile(r"\b(?:mk|rl)_[A-Za-z0-9_]+\b")
@@ -105,6 +109,8 @@ def sanitize_user_ai_text(text: str | None) -> str:
     for raw, label in _VISIBLE_TERM_REPLACEMENTS.items():
         out = re.sub(rf"\b{re.escape(raw)}\b", label, out)
     out = _INTERNAL_NAME_PATTERN.sub("系统数据", out)
+    out = re.sub(r"([\u4e00-\u9fff])\s+(紧急|安全|风险等级)", r"\1\2", out)
+    out = re.sub(r"(紧急|安全|风险等级)\s+([\u4e00-\u9fff])", r"\1\2", out)
     out = re.sub(r"\bSQL\b", "数据查询", out, flags=re.IGNORECASE)
     return out
 

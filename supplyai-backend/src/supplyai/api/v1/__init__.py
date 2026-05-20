@@ -10,6 +10,7 @@ from supplyai.api.v1 import (
     dashboard,
     exports,
     health,
+    notifications,
     purchase,
     rules,
     skus,
@@ -25,6 +26,7 @@ api_v1_router.include_router(purchase.router)
 api_v1_router.include_router(exports.router)
 api_v1_router.include_router(rules.router)
 api_v1_router.include_router(ai.router)
+api_v1_router.include_router(notifications.router)
 # api_v1_router.include_router(ai.router)
 # api_v1_router.include_router(purchase.router)
 # api_v1_router.include_router(exports.router)

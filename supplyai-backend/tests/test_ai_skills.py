@@ -117,6 +117,16 @@ def test_sanitize_user_ai_text_hides_internal_names() -> None:
     assert "FBA 发货记录" in cleaned
 
 
+def test_sanitize_user_ai_text_localizes_visible_risk_terms() -> None:
+    text = "部分商品虽无 immediate 断货风险,但 risk_level 为 safe 时也要关注。"
+    cleaned = sanitize_user_ai_text(text)
+    for raw in ["immediate", "risk_level", "safe"]:
+        assert raw not in cleaned
+    assert "紧急断货风险" in cleaned
+    assert "风险等级" in cleaned
+    assert "安全" in cleaned
+
+
 # ============ classify_status 分级 ============
 
 

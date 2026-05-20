@@ -31,6 +31,12 @@ function sanitizeAIVisibleText(value) {
   });
   return text
     .replace(/\b(?:mk|rl)_[A-Za-z0-9_]+\b/g, '系统数据')
+    .replace(/\brisk_level\b/g, '风险等级')
+    .replace(/\bimmediate\b/gi, '紧急')
+    .replace(/\burgent\b/gi, '紧急')
+    .replace(/\bsafe\b/gi, '安全')
+    .replace(/([\u4e00-\u9fff])\s+(紧急|安全|风险等级)/g, '$1$2')
+    .replace(/(紧急|安全|风险等级)\s+([\u4e00-\u9fff])/g, '$1$2')
     .replace(/\bSQL\b/gi, '数据查询');
 }
 

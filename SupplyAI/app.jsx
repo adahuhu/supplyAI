@@ -12,6 +12,7 @@ function initialRouteFromUrl() {
   if (page === 'sku') return { page: 'sku', skuId: params.get('skuId') || undefined };
   if (page === 'list') return { page: 'list', filter: params.get('filter') || 'all' };
   if (page === 'holiday') return { page: 'holiday', holidayId: params.get('holidayId') || undefined };
+  if (page === 'notifications') return { page: 'notifications' };
   return { page: 'dashboard' };
 }
 
@@ -59,11 +60,21 @@ function initialSkuAiHistoryFromUrl() {
   return {};
 }
 
+function initialAiOpenFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return params.has('aiScenario') || params.get('ai') === '1' || params.get('ai') === 'open';
+}
+
+function initialDingTalkAiDetailFromUrl() {
+  return new URLSearchParams(window.location.search).get('ai') === '1';
+}
+
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [route, setRoute] = React.useState(initialRouteFromUrl);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => window.innerWidth < 760);
-  const [aiOpen, setAiOpen] = React.useState(() => new URLSearchParams(window.location.search).has('aiScenario'));
+  const [aiOpen, setAiOpen] = React.useState(initialAiOpenFromUrl);
+  const dingTalkAiDetail = initialDingTalkAiDetailFromUrl();
   const [aiWide, setAiWide] = React.useState(false);
   const [rulesCtx, setRulesCtx] = React.useState(null);
   const [poIds, setPoIds] = React.useState(null);
@@ -226,6 +237,34 @@ function App() {
   const aiInDrawer = aiOpen && (t.aiMode === 'drawer' || route.page !== 'sku');
   const aiInSplit = aiOpen && t.aiMode === 'split' && route.page === 'sku';
 
+  if (dingTalkAiDetail) {
+    return (
+      <div
+        data-screen-label="DingTalkAIDetail"
+        style={{
+          width: '100vw',
+          height: '100vh',
+          minWidth: 0,
+          minHeight: 0,
+          overflow: 'hidden',
+          background: 'var(--bg)',
+          color: 'var(--text)',
+        }}
+      >
+        <div style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+          <ErrorBoundary>{aiContent}</ErrorBoundary>
+        </div>
+        <ErrorBoundary>
+          <RulesModal open={!!rulesCtx} onClose={() => setRulesCtx(null)} ctx={rulesCtx} showToast={showToast} refreshData={refreshFromBackend}/>
+        </ErrorBoundary>
+        <ErrorBoundary>
+          <CreatePOModal open={!!poIds} onClose={() => setPoIds(null)} ids={poIds || []} showToast={showToast} setRoute={setRoute}/>
+        </ErrorBoundary>
+        <Toast msg={toast} kind="success"/>
+      </div>
+    );
+  }
+
   return (
     <div data-screen-label="App" style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
       <Sidebar route={route} setRoute={setRoute} collapsed={sidebarCollapsed}/>
@@ -292,6 +331,7 @@ function App() {
                   aiMode={t.aiMode}
                 />}
                 {route.page === 'drafts' && <DraftsPage setRoute={setRoute} showToast={showToast} initialIds={route.ids || []} initialItems={route.items || []}/>}
+                {route.page === 'notifications' && <NotificationPage setRoute={setRoute} showToast={showToast}/>}
               </ErrorBoundary>
             )}
           </div>
@@ -335,6 +375,7 @@ function App() {
         <TweakButton label="跳到 SKU 详情演示" onClick={() => setRoute({ page: 'sku', skuId: SKUS[0].id })}/>
         <TweakButton label="打开规则设置弹窗" secondary onClick={() => setRulesCtx({ sku: SKUS[0] })}/>
         <TweakButton label="打开采购计划页面" secondary onClick={() => openCreatePO([SKUS[0].id, SKUS[1].id, SKUS[2].id])}/>
+        <TweakButton label="打开钉钉推送页面" secondary onClick={() => setRoute({ page: 'notifications' })}/>
       </TweaksPanel>
     </div>
   );
