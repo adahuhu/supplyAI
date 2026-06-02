@@ -116,10 +116,16 @@ function HeroSummary({ setRoute }) {
     const suggested = SKUS.filter((s) => s.suggest);
     const urgent = SKUS.filter((s) => s.stockoutRecent7).length;
     const totalAmount = Math.round(
-      suggested.reduce((sum, s) => sum + s.suggestQty * s.cost, 0)
+      suggested.reduce((sum, s) => sum + s.suggestQty * (s.cost || 0), 0)
     );
+    const totalSuggestQty = suggested.reduce((sum, s) => sum + (s.suggestQty || 0), 0);
     const storeCount = new Set(suggested.map((s) => s.store)).size;
-    return { needCount: suggested.length, urgent, totalAmount, storeCount };
+    // FBA 发货建议
+    const shipSkus = SKUS.filter(s => s.shipQty > 0 && !s.isClearance);
+    const totalShipQty = shipSkus.reduce((sum, s) => sum + (s.shipQty || 0), 0);
+    const now = new Date();
+    const urgentShipCount = shipSkus.filter(s => s.shipDate && Math.round((s.shipDate - now) / 86400000) <= 14).length;
+    return { needCount: suggested.length, urgent, totalAmount, totalSuggestQty, storeCount, shipSkuCount: shipSkus.length, totalShipQty, urgentShipCount };
   }, []);
 
   return (
@@ -127,78 +133,111 @@ function HeroSummary({ setRoute }) {
       className="card"
       style={{
         position: 'relative',
-        padding: '22px 26px',
-        background:
-          'linear-gradient(135deg, var(--accent-soft) 0%, transparent 55%), var(--surface)',
+        padding: '0',
+        background: 'linear-gradient(135deg, var(--accent-soft) 0%, transparent 60%), var(--surface)',
         overflow: 'hidden',
         display: 'flex',
-        alignItems: 'center',
-        gap: 28,
+        alignItems: 'stretch',
+        minHeight: 100,
       }}>
 
       {/* Accent left rail */}
-      <div style={{
-        position: 'absolute',
-        left: 0, top: 0, bottom: 0,
-        width: 3,
-        background: 'var(--accent)',
-      }} />
+      <div style={{ width: 3, flex: 'none', background: 'var(--accent)', borderRadius: '6px 0 0 6px' }} />
 
-      {/* Left: statement */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div className="label">今日工作摘要</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-          <div
-            className="num-display tabular"
-            style={{ fontSize: 52, color: 'var(--text)', lineHeight: 1 }}>
-
+      {/* Left: hero statement */}
+      <div style={{ flex: 1, minWidth: 0, padding: '20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
+        <div className="label" style={{ letterSpacing: '0.04em' }}>今日工作摘要</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+          <span className="tabular" style={{ fontSize: 44, fontWeight: 660, lineHeight: 1, letterSpacing: '-0.03em', color: 'var(--text)' }}>
             {data.needCount}
-            <span className="unit" style={{ fontSize: '0.30em', marginLeft: 6 }}>个 SKU</span>
-          </div>
-          <div style={{
-            fontSize: 18,
-            fontWeight: 500,
-            color: 'var(--text)',
-            letterSpacing: '-0.012em'
-          }}>
-            需要立即下采购
-          </div>
+          </span>
+          <span style={{ fontSize: 16, fontWeight: 500, color: 'var(--text)', letterSpacing: '-0.01em' }}>
+            个 SKU 需要立即下采购
+          </span>
         </div>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          fontSize: 12.5,
-          color: 'var(--text-2)',
-          flexWrap: 'wrap'
-        }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <span className="dot p1" />
-            <span className="tabular" style={{ fontWeight: 600, color: 'var(--p1-strong)' }}>{data.urgent}</span>
-            <span style={{ color: 'var(--text-3)' }}>个 7 天内断货</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-3)' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span className="dot p1" style={{ width: 6, height: 6 }} />
+            <span className="tabular" style={{ fontWeight: 600, color: 'var(--p1)' }}>{data.urgent}</span>
+            <span>个 7 天内断货</span>
           </span>
-          <span style={{ color: 'var(--text-4)' }}>·</span>
-          <span>
-            涉及 <span className="tabular" style={{ fontWeight: 500 }}>{data.storeCount}</span> 个店铺
-          </span>
+          <span style={{ color: 'var(--border-strong)' }}>·</span>
+          <span>涉及 <span className="tabular" style={{ fontWeight: 500, color: 'var(--text-2)' }}>{data.storeCount}</span> 个店铺</span>
         </div>
       </div>
 
-      {/* Right: actions */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        alignItems: 'flex-end',
-        flex: 'none'
-      }}>
-        <button
-          className="btn ghost sm"
-          style={{ color: 'var(--accent-text)' }}
-          onClick={() => setRoute({ page: 'list', filter: 'suggest' })}>
+      {/* Right: 两个语义分组卡片 */}
+      <div style={{ display: 'flex', alignItems: 'stretch', flex: 'none', gap: 0 }}>
 
-          查看建议采购 →
-        </button>
+        {/* 组 1：采购建议 */}
+        <div style={{
+          borderLeft: '1px solid var(--border)',
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          padding: '14px 24px 12px',
+          minWidth: 160,
+          position: 'relative',
+        }}>
+          <div style={{ borderTop: '2px solid var(--p2)', position: 'absolute', top: 0, left: 24, right: 24 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10 }}>
+            <Icon name="package" size={11} color="var(--p2)" />
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--p2)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>采购建议</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+              <span className="tabular" style={{ fontSize: 28, fontWeight: 650, lineHeight: 1, letterSpacing: '-0.025em', color: 'var(--text)' }}>
+                {fmt.num(data.totalSuggestQty)}
+              </span>
+              <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>件</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
+              {data.totalAmount > 0
+                ? <span>预计 <span className="tabular" style={{ color: 'var(--text-2)', fontWeight: 500 }}>{fmt.money(data.totalAmount)}</span></span>
+                : <span style={{ color: 'var(--text-4)' }}>成本待录入</span>}
+            </div>
+          </div>
+          <button
+            onClick={() => setRoute({ page: 'list', filter: 'suggest' })}
+            style={{ marginTop: 10, appearance: 'none', border: 'none', background: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--p2)', fontFamily: 'inherit', fontWeight: 500 }}>
+            查看采购 <span style={{ fontSize: 10 }}>→</span>
+          </button>
+        </div>
+
+        {/* 组 2：FBA 发货建议 */}
+        <div style={{
+          borderLeft: '1px solid var(--border)',
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          padding: '14px 24px 12px',
+          minWidth: 160,
+          position: 'relative',
+          background: data.urgentShipCount > 0 ? 'rgba(248,113,113,0.04)' : 'transparent',
+        }}>
+          <div style={{ borderTop: '2px solid var(--accent)', position: 'absolute', top: 0, left: 24, right: 24 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10 }}>
+            <Icon name="lightning" size={11} color="var(--accent)" />
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--accent-text)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>FBA 发货</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+              <span className="tabular" style={{ fontSize: 28, fontWeight: 650, lineHeight: 1, letterSpacing: '-0.025em', color: data.shipSkuCount > 0 ? 'var(--accent-text)' : 'var(--text-4)' }}>
+                {data.shipSkuCount}
+              </span>
+              <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>个 SKU</span>
+            </div>
+            <div style={{ fontSize: 11.5 }}>
+              {data.urgentShipCount > 0
+                ? <span style={{ color: 'var(--p1)', fontWeight: 500 }}>
+                    <span className="tabular">{data.urgentShipCount}</span> 个窗口 ≤14天
+                  </span>
+                : <span style={{ color: 'var(--text-4)' }}>暂无紧迫窗口</span>}
+            </div>
+          </div>
+          <button
+            onClick={() => setRoute({ page: 'list', filter: 'shipSuggest' })}
+            style={{ marginTop: 10, appearance: 'none', border: 'none', background: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: 'var(--accent-text)', fontFamily: 'inherit', fontWeight: 500 }}>
+            查看发货 <span style={{ fontSize: 10 }}>→</span>
+          </button>
+        </div>
+
       </div>
     </section>);
 
@@ -292,6 +331,133 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
   }, []);
 
   const queue = SKUS.filter((s) => s.priority === 'p1' || s.priority === 'p2').slice(0, 8);
+
+  // 从真实数据动态生成「需关注」告警
+  const attentionItems = React.useMemo(() => {
+    const skus = window.SKUS || [];
+    const items = [];
+
+    // 1. P1 但建议采购量为 0（有风险、无规则或缺成本）
+    const p1NoSuggest = skus.filter(s => s.priority === 'p1' && !s.suggest && !s.isClearance);
+    if (p1NoSuggest.length > 0) {
+      items.push({
+        id: 'p1-no-suggest',
+        kind: 'urgent',
+        title: `${p1NoSuggest.length} 个 P1 风险但建议采购为 0，需检查规则或成本配置`,
+        action: '查看',
+        route: { page: 'list', filter: 'p1' },
+      });
+    }
+
+    // 2. 近7天已实际断货
+    const recentStockout = skus.filter(s => s.stockoutRecent7);
+    if (recentStockout.length > 0) {
+      items.push({
+        id: 'recent-stockout',
+        kind: 'urgent',
+        title: `${recentStockout.length} 个 SKU 近 7 天 FBA 已断货，销售受损`,
+        action: '查看',
+        route: { page: 'list', filter: 'stockout7' },
+      });
+    }
+
+    // 3. 3天内即将断货（极度紧急）
+    const criticalSoon = skus.filter(s => !s.isClearance && s.fbaSellable > 0 && s.fbaSellable <= 3);
+    if (criticalSoon.length > 0) {
+      items.push({
+        id: 'critical-soon',
+        kind: 'urgent',
+        title: `${criticalSoon.length} 个 SKU FBA 库存仅剩 ≤3 天，需立即处理`,
+        action: '处理',
+        route: { page: 'list', filter: 'p1' },
+      });
+    }
+
+    // 4. 缺少单价数据导致无法计算采购金额
+    const noCost = skus.filter(s => s.suggest && (!s.cost || s.cost === 0));
+    if (noCost.length > 0) {
+      items.push({
+        id: 'no-cost',
+        kind: 'review',
+        title: `${noCost.length} 个建议采购 SKU 缺少成本数据，采购金额无法计算`,
+        action: '补录',
+        route: { page: 'list', filter: 'suggest' },
+      });
+    }
+
+    // 5. 节日临近 + 对应 SKU 库存不足
+    const holidays = window.HOLIDAYS_DATA || [];
+    const asOf = stats.asOf instanceof Date ? stats.asOf : new Date();
+    for (const h of holidays) {
+      const peakDate = h.peak_date ? new Date(h.peak_date) : null;
+      if (!peakDate) continue;
+      const daysLeft = Math.round((peakDate - asOf) / 86400000);
+      if (daysLeft < 0 || daysLeft > 45) continue;
+      const holSkus = skus.filter(s =>
+        s.isHoliday && s.holidayTag && h.name && h.name.includes(s.holidayTag) &&
+        s.fbaSellable < 30
+      );
+      if (holSkus.length > 0) {
+        items.push({
+          id: `holiday-${h.id}`,
+          kind: 'review',
+          title: `${h.name} 还有 ${daysLeft} 天，${holSkus.length} 个关联 SKU 库存不足 30 天`,
+          action: '查看',
+          route: { page: 'list', filter: 'all' },
+        });
+      }
+    }
+
+    // 6. 严重积压（可售天数 > 90 天 且库存 > 200 件）
+    const overstock = skus.filter(s => s.sellable > 90 && s.totalStock > 200 && !s.isClearance);
+    if (overstock.length > 0) {
+      items.push({
+        id: 'overstock',
+        kind: 'info',
+        title: `${overstock.length} 个 SKU 库存压积 >90 天，占用资金需关注`,
+        action: '查看',
+        route: { page: 'list', filter: 'all' },
+      });
+    }
+
+    // 7. 清货中 SKU 仍被标为 P1（说明清货进展慢、断货风险高）
+    const clearanceP1 = skus.filter(s => s.isClearance && s.priority === 'p1');
+    if (clearanceP1.length > 0) {
+      items.push({
+        id: 'clearance-p1',
+        kind: 'review',
+        title: `${clearanceP1.length} 个清货中 SKU 仍为 P1 风险，清货进展异常`,
+        action: '查看',
+        route: { page: 'list', filter: 'p1' },
+      });
+    }
+
+    // 8. 本地有货、有发货建议、且发货窗口 ≤14 天即将关闭
+    const logDays = window.FBA_LOGISTICS_DAYS || 35;
+    const now = asOf;
+    const urgentShip = skus.filter(s => {
+      if (!s.shipQty || s.shipQty <= 0 || s.isClearance) return false;
+      if (!s.shipDate) return false;
+      const daysLeft = Math.round((s.shipDate - now) / 86400000);
+      return daysLeft <= 14;
+    });
+    if (urgentShip.length > 0) {
+      const overdue = urgentShip.filter(s => s.shipDate < now).length;
+      const minDays = Math.min(...urgentShip.map(s => Math.round((s.shipDate - now) / 86400000)));
+      const desc = overdue > 0
+        ? `其中 ${overdue} 个已逾期，需立即发货`
+        : `最早窗口还剩 ${minDays} 天`;
+      items.push({
+        id: 'urgent-ship',
+        kind: overdue > 0 ? 'urgent' : 'review',
+        title: `${urgentShip.length} 个 SKU 本地有货但发货窗口即将关闭（头程 ${logDays} 天），${desc}`,
+        action: '查看',
+        route: { page: 'list', filter: 'all' },
+      });
+    }
+
+    return items;
+  }, [SKUS.length, stats.calcRunId]);
   const nextHoliday = nextHolidayFromData(stats.asOf);
   const nextHolidaySkus = holidayRelatedSkus(nextHoliday);
   const nextHolidayD = daysUntil(nextHoliday?.peakDate, stats.asOf);
@@ -516,10 +682,14 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
                 <th>预计断货</th>
                 <th className="num">建议采购</th>
                 <th>建议采购时间</th>
+                <th className="num">建议发货量</th>
+                <th>建议发货时间</th>
               </tr>
             </thead>
             <tbody>
-              {queue.map((s) =>
+              {queue.map((s) => {
+                const shipOverdue = s.shipDate && s.shipDate < new Date();
+                return (
                 <tr key={s.id} style={{ cursor: 'pointer' }}
                 onClick={() => setRoute({ page: 'sku', skuId: s.id })}>
                   <td><input type="checkbox" onClick={(e) => e.stopPropagation()} /></td>
@@ -548,43 +718,42 @@ function Dashboard({ setRoute, openAI, openCreatePO, dashFilters, setDashFilters
                   <td className="tabular">{fmt.dateLong(s.stockoutDate)}<span style={{ color: 'var(--text-3)', marginLeft: 6, fontSize: 11 }}>{fmt.rel(s.stockoutDate)}</span></td>
                   <td className="num tabular" style={{ fontWeight: 500 }}>{fmt.num(s.suggestQty)}</td>
                   <td className="tabular" style={{ color: 'var(--text-2)' }}>{fmt.dateLong(s.purchaseDate)}</td>
+                  <td className="num tabular" style={{ fontWeight: 500, color: (s.shipQty > 0) ? 'var(--accent-text)' : 'var(--text-4)' }}>
+                    {s.shipQty > 0 ? fmt.num(s.shipQty) : '—'}
+                  </td>
+                  <td className="tabular" style={{ color: shipOverdue ? 'var(--p1)' : 'var(--text-2)', fontWeight: shipOverdue ? 600 : 400 }}>
+                    {s.shipQty > 0 ? (shipOverdue ? '尽快' : fmt.dateLong(s.shipDate)) : '—'}
+                  </td>
                 </tr>
-                )}
+                );
+              })}
             </tbody>
           </table>
         </div>
       </Panel>
 
-      <Panel title="需关注" sub="数据质量 · 规则配置 · 风险变化">
-        {TODAY_ACTIONS.length === 0 ? (
-          <div style={{ padding: '20px 4px', fontSize: 12, color: 'var(--text-3)', textAlign: 'center' }}>
-            暂无告警 · 待 <span className="mono">/dashboard/data-quality-alerts</span> 端点上线后接入
+      <Panel title="需关注" sub={attentionItems.length > 0 ? `${attentionItems.length} 条待处理` : '暂无异常'}>
+        {attentionItems.length === 0 ? (
+          <div style={{ padding: '20px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <Icon name="check" size={18} color="var(--p3)"/>
+            <span style={{ fontSize: 12, color: 'var(--text-3)' }}>所有指标正常，无需处理</span>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {TODAY_ACTIONS.map((a, i) =>
+            {attentionItems.map((a, i) =>
               <div key={a.id} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
+                display: 'flex', alignItems: 'flex-start', gap: 10,
                 padding: '10px 0',
-                borderBottom: i < TODAY_ACTIONS.length - 1 ? '1px solid var(--border)' : 'none',
+                borderBottom: i < attentionItems.length - 1 ? '1px solid var(--border)' : 'none',
                 minWidth: 0
               }}>
-                <span className={'dot ' + (a.kind === 'urgent' ? 'p1' : a.kind === 'review' ? 'p2' : 'p3')} style={{ flex: 'none' }} />
-                <div style={{ flex: 1, minWidth: 0 }} title={a.title}>
-                  <div style={{
-                    fontSize: 12.5,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>{a.title}</div>
+                <span className={'dot ' + (a.kind === 'urgent' ? 'p1' : a.kind === 'review' ? 'p2' : 'p3')}
+                  style={{ flex: 'none', marginTop: 5 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-1)' }}>{a.title}</div>
                 </div>
                 <button className="btn sm ghost"
-                  onClick={() => {
-                    // 按告警 kind 跳到对应排查视图
-                    if (a.kind === 'review') setRoute({ page: 'list', filter: 'p1' });
-                    else if (a.kind === 'rule') setRoute({ page: 'list', filter: 'suggest' });
-                    else setRoute({ page: 'list', filter: 'suggest' });
-                  }}
+                  onClick={() => a.route && setRoute(a.route)}
                   style={{ color: 'var(--accent-text)', flex: 'none' }}>{a.action || '查看'} →</button>
               </div>
               )}

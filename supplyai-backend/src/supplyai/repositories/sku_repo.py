@@ -90,6 +90,7 @@ class SkuRepository:
                     MkStockoutEvent.mall_id == stat.mall_id,
                     MkStockoutEvent.msku == stat.msku,
                     MkStockoutEvent.start_at >= stockout_since,
+                    MkStockoutEvent.event_status.in_(["active", "open"]),
                 )
                 .exists()
             )
@@ -144,6 +145,7 @@ class SkuRepository:
             .where(
                 event.tenant_id == tenant_id,
                 event.start_at >= since,
+                event.event_status.in_(["active", "open"]),
                 or_(*pair_filters),
             )
             .group_by(event.msku, event.mall_id)

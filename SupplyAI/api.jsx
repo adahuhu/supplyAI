@@ -7,6 +7,8 @@
     const fromQuery = params.get('api');
     if (fromQuery) return fromQuery.replace(/\/$/, '');
     if (window.SUPPLYAI_API_BASE) return window.SUPPLYAI_API_BASE.replace(/\/$/, '');
+    // 从后端端口直接访问时（外网隧道或生产），使用相对路径
+    if (location.port !== '5173') return '/api/supplyai';
     return 'http://127.0.0.1:8000/api/supplyai';
   }
 

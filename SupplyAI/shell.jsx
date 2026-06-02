@@ -28,7 +28,7 @@ function Sidebar({ route, setRoute, collapsed }) {
         {!collapsed && (
           <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
             <div style={{ fontWeight: 600, fontSize: 13 }}>SupplyAI</div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>供应链分析工作台</div>
+            <div style={{ fontSize: 10.5, color: 'var(--text-3)' }}>补货 AI 助手</div>
           </div>
         )}
       </div>

@@ -258,6 +258,198 @@ function adviceSkuPool() {
   return Array.isArray(window.SKUS) ? window.SKUS : [];
 }
 
+// ── 销量趋势图 ────────────────────────────────
+
+function isSalesQuery(text) {
+  return /销量|卖了多少|销售|热销|畅销|销额|趋势|近\d+天|最近.*销|sales|revenue|排行|排名|卖得/i.test(text);
+}
+
+function calcSalesTrend(data) {
+  if (!data || data.length < 2) return 0;
+  const half = Math.ceil(data.length / 2);
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const f = avg(data.slice(0, half)), l = avg(data.slice(-half));
+  return f > 0 ? Math.round((l - f) / f * 100) : 0;
+}
+
+function SalesSparkline({ data = [], height = 36, up = true }) {
+  if (!data.length) return <div style={{ height }}/>;
+  const max = Math.max(...data, 1);
+  const n = data.length;
+  const W = 100, gap = 1.8;
+  const barW = (W - gap * (n - 1)) / n;
+  const barColor = up ? '#34d399' : '#f87171';
+  const lineColor = up ? 'rgba(52,211,153,.9)' : 'rgba(248,113,113,.9)';
+  const points = data.map((v, i) => {
+    const x = i * (barW + gap) + barW / 2;
+    const y = height - Math.max(2, (v / max) * height);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none"
+      style={{ display: 'block', width: '100%', height }}>
+      {data.map((v, i) => {
+        const bh = Math.max(2, (v / max) * height);
+        return (
+          <rect key={i}
+            x={(i * (barW + gap)).toFixed(1)} y={(height - bh).toFixed(1)}
+            width={barW.toFixed(1)} height={bh.toFixed(1)}
+            fill={barColor} opacity={(0.28 + (v / max) * 0.55).toFixed(2)} rx="1"/>
+        );
+      })}
+      <polyline points={points} fill="none"
+        stroke={lineColor} strokeWidth="1.4"
+        strokeLinejoin="round" strokeLinecap="round"/>
+      {/* dots on each point */}
+      {data.map((v, i) => {
+        const x = i * (barW + gap) + barW / 2;
+        const y = height - Math.max(2, (v / max) * height);
+        return <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="1.3" fill={lineColor}/>;
+      })}
+    </svg>
+  );
+}
+
+function SkuSalesChip({ sku, onClick }) {
+  const data = sku.recent7 || [];
+  const trend = calcSalesTrend(data);
+  const up = trend >= 0;
+  const priColor = { p1: 'var(--p1)', p2: 'var(--p2)', p3: 'var(--p3)', safe: 'var(--text-4)' }[sku.priority] || 'var(--text-4)';
+  return (
+    <button onClick={() => onClick && onClick(sku)} style={{
+      appearance: 'none', cursor: 'pointer', fontFamily: 'inherit',
+      border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+      background: 'var(--surface)', padding: '9px 10px', color: 'inherit',
+      display: 'flex', flexDirection: 'column', gap: 5, textAlign: 'left',
+      transition: 'border-color .14s, background .14s',
+    }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface)'; }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+        <span className="mono" style={{ fontSize: 11.5, fontWeight: 650, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-1)' }}>{sku.msku}</span>
+        <span style={{ fontSize: 9.5, padding: '1px 4px', borderRadius: 3, border: `1px solid ${priColor}`, color: priColor, flex: 'none' }}>{(sku.priority || 'safe').toUpperCase()}</span>
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: -3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sku.store}</div>
+      <SalesSparkline data={data} height={34} up={up}/>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--text-3)' }}>7天 <span className="tabular" style={{ color: 'var(--text-1)', fontWeight: 700 }}>{(sku.sales7d ?? 0).toLocaleString()}</span></span>
+        <span style={{ fontSize: 10.5, color: 'var(--text-3)' }}>日均 <span className="tabular" style={{ fontWeight: 600, color: 'var(--text-1)' }}>{sku.last7Daily ?? '—'}</span></span>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: up ? '#34d399' : '#f87171' }}>
+          {up ? '↑' : '↓'}{Math.abs(trend)}%
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function SalesTrendGridCard({ skus, onSkuClick }) {
+  const sorted = [...(skus || [])].sort((a, b) => (b.sales7d || 0) - (a.sales7d || 0)).slice(0, 12);
+  const total7d = sorted.reduce((a, s) => a + (s.sales7d || 0), 0);
+  const avgDaily = sorted.length ? Math.round(total7d / 7) : 0;
+  const upCount = sorted.filter(s => calcSalesTrend(s.recent7 || []) >= 0).length;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7 }}>
+        {[
+          { label: '7天总销量', value: total7d.toLocaleString(), unit: '件' },
+          { label: '平均日销', value: avgDaily.toLocaleString(), unit: '件/天' },
+          { label: '上升趋势', value: upCount, unit: `/ ${sorted.length} 个` },
+        ].map((m, i) => (
+          <div key={i} style={{ padding: '9px 10px', border: '1px solid var(--border)', borderRadius: 'var(--r)', background: 'var(--surface-2)' }}>
+            <div className="label">{m.label}</div>
+            <div style={{ marginTop: 3, fontSize: 17, fontWeight: 700, lineHeight: 1.2 }}>
+              {m.value}<span style={{ fontSize: 10.5, color: 'var(--text-3)', marginLeft: 3 }}>{m.unit}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 7 }}>
+        {sorted.map(s => <SkuSalesChip key={s.id} sku={s} onClick={onSkuClick}/>)}
+      </div>
+    </div>
+  );
+}
+
+function SkuSalesTrendDetail({ sku }) {
+  const data = sku.recent7 || [];
+  const trend = calcSalesTrend(data);
+  const up = trend >= 0;
+  const max = Math.max(...data, 1);
+  const today = new Date();
+  const labels = data.map((_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - (data.length - 1 - i));
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  });
+  const W = 280, H = 64, gap = 3, n = data.length;
+  const barW = (W - gap * (n - 1)) / n;
+  const barColor = up ? '#34d399' : '#f87171';
+  const lineColor = up ? 'rgba(52,211,153,.85)' : 'rgba(248,113,113,.85)';
+  const barPoints = data.map((v, i) => {
+    const x = i * (barW + gap) + barW / 2;
+    const y = H - Math.max(3, (v / max) * H);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontWeight: 650, fontSize: 12 }}>近7天日销趋势</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: up ? '#34d399' : '#f87171' }}>{up ? '↑' : '↓'} {Math.abs(trend)}%</span>
+        <span style={{ flex: 1 }}/>
+        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>合计 <b style={{ color: 'var(--text-1)' }}>{sku.sales7d ?? '—'}</b> 件</span>
+      </div>
+      <div style={{ position: 'relative', paddingBottom: 16 }}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+          style={{ display: 'block', width: '100%', height: H }}>
+          {data.map((v, i) => {
+            const bh = Math.max(3, (v / max) * H);
+            const x = i * (barW + gap);
+            const y = H - bh;
+            return (
+              <g key={i}>
+                <rect x={x.toFixed(1)} y={y.toFixed(1)}
+                  width={barW.toFixed(1)} height={bh.toFixed(1)}
+                  fill={barColor} opacity={(0.28 + (v / max) * 0.52).toFixed(2)} rx="2"/>
+                {v > 0 && (
+                  <text x={(x + barW / 2).toFixed(1)} y={(y - 3).toFixed(1)}
+                    textAnchor="middle" fontSize="7"
+                    fill="rgba(255,255,255,.65)">{v}</text>
+                )}
+              </g>
+            );
+          })}
+          <polyline points={barPoints} fill="none"
+            stroke={lineColor} strokeWidth="1.5"
+            strokeLinejoin="round" strokeLinecap="round"/>
+          {data.map((v, i) => {
+            const x = i * (barW + gap) + barW / 2;
+            const y = H - Math.max(3, (v / max) * H);
+            return <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="2" fill={lineColor}/>;
+          })}
+        </svg>
+        <div style={{ display: 'flex', position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          {labels.map((l, i) => (
+            <span key={i} style={{ flex: 1, fontSize: 9, color: 'var(--text-4)', textAlign: 'center' }}>{l}</span>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+        {[
+          { label: '7天合计', value: `${sku.sales7d ?? '—'} 件` },
+          { label: '日均', value: `${sku.last7Daily ?? '—'} 件` },
+          { label: '预测日销', value: `${sku.futureDaily ?? '—'} 件` },
+        ].map((m, i) => (
+          <div key={i} style={{ padding: '7px 8px', border: '1px solid var(--border)', borderRadius: 'var(--r)', background: 'var(--bg-sunken)' }}>
+            <div className="label">{m.label}</div>
+            <div className="tabular" style={{ marginTop: 3, fontWeight: 650, fontSize: 13 }}>{m.value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function findSkuForAdvice(advice) {
   const list = adviceSkuPool();
   return list.find((s) => {
@@ -672,45 +864,37 @@ function SalesLeadersCard({ card, setRoute, openCreatePO, onClose }) {
       </div>
       <MetricGrid items={card.metrics}/>
       <EvidenceGrid items={card.evidence}/>
-      <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden', background: 'var(--surface)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 74px 74px 88px', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', color: 'var(--text-3)', fontSize: 11 }}>
-          <div>SKU</div>
-          <div style={{ textAlign: 'right' }}>近7天</div>
-          <div style={{ textAlign: 'right' }}>预测日销</div>
-          <div style={{ textAlign: 'right' }}>可售天数</div>
-          <div>建议</div>
-        </div>
-        {(card.rows || []).map((s) => (
-          <button key={s.id} onClick={() => setRoute && setRoute({ page: 'sku', skuId: s.id })} style={{
-            width: '100%',
-            border: 0,
-            borderBottom: '1px solid var(--border)',
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            display: 'grid',
-            gridTemplateColumns: '1fr 70px 74px 74px 88px',
-            gap: 8,
-            alignItems: 'center',
-            padding: '10px',
-            textAlign: 'left',
-            fontFamily: 'inherit',
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="mono" style={{ fontSize: 12, color: 'var(--text-1)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                {s.msku}<PriorityBadge level={s.priority} compact/>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 7 }}>
+        {(card.rows || []).map((s) => {
+          const skuFull = (window.SKUS || []).find(sk => sk.id === s.id) || s;
+          const data = skuFull.recent7 || [];
+          const trend = calcSalesTrend(data);
+          const up = trend >= 0;
+          return (
+            <button key={s.id} onClick={() => setRoute && setRoute({ page: 'sku', skuId: s.id })} style={{
+              appearance: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+              background: 'var(--surface)', padding: '9px 10px', color: 'inherit',
+              display: 'flex', flexDirection: 'column', gap: 5, textAlign: 'left',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span className="mono" style={{ fontSize: 11.5, fontWeight: 650, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.msku}</span>
+                <PriorityBadge level={s.priority} compact/>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: up ? '#34d399' : '#f87171' }}>{up ? '↑' : '↓'}{Math.abs(trend)}%</span>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name || s.sku}</div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-4)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {(s.reasons || []).slice(0, 2).join(' · ')}
+              <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: -3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name || s.sku}</div>
+              <SalesSparkline data={data} height={30} up={up}/>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-3)' }}>7天 <b style={{ color: 'var(--text-1)' }}>{adviceFormatNum(s.sales7d)}</b></span>
+                <span style={{ fontSize: 10.5, color: 'var(--text-3)' }}>预测 <b style={{ color: 'var(--text-1)' }}>{adviceFormatFlexible(s.futureDaily)}/天</b></span>
+                <span style={{ fontSize: 10.5, color: Number(s.fbaSellable || 0) < 7 ? 'var(--p1)' : 'var(--text-3)' }}>FBA <b>{adviceFormatFlexible(s.fbaSellable)}天</b></span>
               </div>
-            </div>
-            <div className="tabular" style={{ textAlign: 'right', fontWeight: 700 }}>{adviceFormatNum(s.sales7d)}</div>
-            <div className="tabular" style={{ textAlign: 'right' }}>{adviceFormatFlexible(s.futureDaily)}</div>
-            <div className="tabular" style={{ textAlign: 'right', color: Number((s.sellableDays ?? s.sellable ?? s.fbaSellable) || 0) < 7 ? 'var(--p1)' : 'inherit' }}>{adviceFormatFlexible(s.sellableDays ?? s.sellable ?? s.fbaSellable)} 天</div>
-            <div style={{ color: s.recommendation === '优先加码' || s.recommendation === '重点推广' ? 'var(--p3)' : 'var(--p2)', fontWeight: 650 }}>{s.recommendation}</div>
-          </button>
-        ))}
+              {s.recommendation && (
+                <div style={{ fontSize: 10.5, fontWeight: 650, color: s.recommendation === '优先加码' || s.recommendation === '重点推广' ? 'var(--p3)' : 'var(--p2)' }}>{s.recommendation}</div>
+              )}
+            </button>
+          );
+        })}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <button className="btn sm" onClick={() => {
@@ -1016,6 +1200,8 @@ function StructuredAICard({ card, text, sku, setRoute, openCreatePO, openRules, 
   if (built?.type === 'holiday_readiness') return <HolidayReadinessCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
   if (built?.type === 'plan_comparison') return <PlanComparisonCard card={built} setRoute={setRoute} openCreatePO={openCreatePO} onClose={onClose}/>;
   if (built?.type === 'rule_impact') return <RuleImpactCard card={built} setRoute={setRoute} openRules={openRules} onClose={onClose} refreshData={refreshData} showToast={showToast}/>;
+  if (built?.type === 'sales_trend') return <SalesTrendGridCard skus={built.skus} onSkuClick={s => setRoute && setRoute({ page: 'sku', skuId: s.id })}/>;
+  if (built?.type === 'sku_sales_trend') return <SkuSalesTrendDetail sku={built.sku}/>;
   return <AIDecisionCard text={text} sku={sku} onAction={onAction} onCreatePlan={onCreatePlan}/>;
 }
 
@@ -1117,6 +1303,7 @@ const TOOL_LABEL = {
 // 每个场景对应一类决策:单 SKU/优先级/活动/风险/方案/新品/管理层。
 const GLOBAL_AI_QUESTIONS = [
   { tag: '高风险队列', q: '本周哪些 SKU 必须补货?按紧急度排序并说明原因。' },
+  { tag: '销量趋势', q: '近7天各 SKU 销量趋势如何?哪些在上升哪些在下滑?' },
   { tag: '大促备货', q: '下一个大促要为哪些 SKU 备货?缺口和建议采购量是多少?' },
   { tag: '单 SKU 补货', q: '挑一个高风险 SKU,告诉我还能卖多久,要不要补、补多少?' },
   { tag: '方案对比', q: '只海运 vs 海+空混合,成本和断货风险分别是什么?' },
@@ -1167,13 +1354,23 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
   const [toolStatus, setToolStatus] = React.useState(''); // 正在调用的 tool 名
   const sendToBackend = async (text) => {
     setHistory(h => [...h, { role: 'user', text }]);
+    // 检测到销量相关问题 → 立即注入销量趋势图卡片
+    if (isSalesQuery(text)) {
+      const skus = (window.SKUS || []).filter(s => (s.recent7 || []).length > 0);
+      if (skus.length > 0) {
+        setHistory(h => [...h, {
+          role: 'ai', card: { type: 'sales_trend', skus },
+          text: '', chartOnly: true,
+        }]);
+      }
+    }
     setThinking(true);
     setToolStatus('');
     try {
       const msgs = [];
       for (const m of history) {
         if (m.role === 'user' && m.text) msgs.push({ role: 'user', content: m.text });
-        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: sanitizeAIVisibleText(m.text) });
+        else if (m.role === 'ai' && m.text && !m.chartOnly) msgs.push({ role: 'assistant', content: sanitizeAIVisibleText(m.text) });
       }
       msgs.push({ role: 'user', content: text });
       const context = { current_page: 'dashboard' };
@@ -1277,11 +1474,11 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
                     active={!!m.streaming && !m.text}
                   />
                 )}
-                {m.text && (m.explain
+                {(m.text || m.chartOnly) && (m.explain
                   ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: renderAIVisibleMarkdown(m.text) }}/>
                   : <StructuredAICard
                       card={m.card}
-                      text={sanitizeAIVisibleText(m.text)}
+                      text={sanitizeAIVisibleText(m.text || '')}
                       setRoute={setRoute}
                       openCreatePO={openCreatePO}
                       openRules={openRules}
@@ -1349,12 +1546,15 @@ function GlobalAIPanel({ onClose, setRoute, openCreatePO, openRules, dashFilters
 // ── SKU AI ────────────────────────────────
 const skuQuestions = (sku) => [
   `为什么 ${sku.msku} 是 ${(sku.priority || '').toUpperCase()}?`,
+  '近7天销量趋势如何?有没有异常波动?',
   '为什么建议这个采购数量?',
   '安全天数改成 21 会怎样?',
-  '哪些因素影响最大?',
 ];
 
-function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWide, openCreatePO, openRules, refreshData, showToast }) {
+function SKUAIPanel({ sku, onClose, mode, history: historyProp, setHistory: setHistoryProp, wide, onToggleWide, openCreatePO, openRules, refreshData, showToast }) {
+  const [localHistory, setLocalHistory] = React.useState([]);
+  const history = historyProp !== undefined ? historyProp : localHistory;
+  const setHistory = setHistoryProp !== undefined ? setHistoryProp : setLocalHistory;
   const [thinking, setThinking] = React.useState(false);
   const [toolStatus, setToolStatus] = React.useState('');
   // 挂载后调 /ai/explain — 仅在该 SKU 历史为空时(首次打开),已有历史就跳过
@@ -1400,13 +1600,20 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
 
   const sendToBackend = async (text) => {
     setHistory(h => [...h, { role: 'user', text }]);
+    // 检测到销量相关问题 → 立即注入当前 SKU 销量趋势图
+    if (isSalesQuery(text) && sku && (sku.recent7 || []).length > 0) {
+      setHistory(h => [...h, {
+        role: 'ai', card: { type: 'sku_sales_trend', sku },
+        text: '', chartOnly: true,
+      }]);
+    }
     setThinking(true);
     setToolStatus('');
     try {
       const msgs = [];
       for (const m of history) {
         if (m.role === 'user' && m.text) msgs.push({ role: 'user', content: m.text });
-        else if (m.role === 'ai' && m.text) msgs.push({ role: 'assistant', content: sanitizeAIVisibleText(m.text) });
+        else if (m.role === 'ai' && m.text && !m.chartOnly) msgs.push({ role: 'assistant', content: sanitizeAIVisibleText(m.text) });
       }
       msgs.push({ role: 'user', content: text });
       const context = {
@@ -1526,11 +1733,11 @@ function SKUAIPanel({ sku, onClose, mode, history, setHistory, wide, onToggleWid
                     active={!!m.streaming && !m.text}
                   />
                 )}
-                {m.text && (m.explain
+                {(m.text || m.chartOnly) && (m.explain
                   ? <div style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-1)' }} dangerouslySetInnerHTML={{ __html: renderAIVisibleMarkdown(m.text) }}/>
                   : <StructuredAICard
                       card={m.card}
-                      text={sanitizeAIVisibleText(m.text)}
+                      text={sanitizeAIVisibleText(m.text || '')}
                       sku={sku}
                       openCreatePO={openCreatePO}
                       openRules={openRules}

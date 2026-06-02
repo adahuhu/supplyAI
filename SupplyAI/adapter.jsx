@@ -3,6 +3,18 @@
 // 缺失字段以合理默认填充,UI 容错。
 
 (function () {
+  const HOLIDAY_TAG_SET = new Set([
+    // 英文 / 国际
+    'Prime Day', 'Black Friday', 'Cyber Monday', 'Christmas', 'Thanksgiving',
+    'Halloween', "New Year", "Valentine's Day", "Mother's Day", "Father's Day",
+    'Easter', 'Memorial Day', 'Labor Day', 'Back to School', 'Super Bowl',
+    '4th of July', 'Independence Day',
+    // 中文
+    '黑五', '圣诞节', '感恩节', '万圣节', '双十一', '双12', '新年', '春节',
+    '母亲节', '父亲节', '情人节', '复活节', '劳工节', '独立日', '开学季',
+    '超级碗', '网络星期一', '阵亡将士纪念日', '大促', '亚马逊大促',
+    'Prime会员日', '年中大促',
+  ]);
   const COUNTRY_TABLE = {
     US: { code: 'US', flag: '🇺🇸', name: '美国' },
     DE: { code: 'DE', flag: '🇩🇪', name: '德国' },
@@ -95,6 +107,9 @@
       labelIds: row.label_ids || tags.join(','),
       tags,
       listingTags: tags,
+      isClearance: tags.some(t => t === '清货'),
+      isHoliday: tags.some(t => HOLIDAY_TAG_SET.has(t)),
+      holidayTag: tags.find(t => HOLIDAY_TAG_SET.has(t)) || null,
       store: row.store_name || '—',
       country,
       owner: row.owner || '',
@@ -128,6 +143,28 @@
       totalCoverage: (row.lead_time_days ?? 0) + (row.safety_days ?? 0),
       stockoutDate: toDate(row.stockout_date),
       purchaseDate: toDate(row.purchase_date),
+
+      // FBA 发货建议 (本地仓 → FBA 头程)
+      // 目标 FBA 库存 = (头程天数 + 安全天数) × 日销  ← 只看发货窗口，不混入采购周期
+      // shipQty: FBA 缺口 = 目标 FBA 库存 - FBA 可用 - FBA 在途
+      //   不用本地库存做上限 — 这里反映"FBA 需要多少"，不反映"今天能发多少"
+      //   本地库存已在列表 localTotal 列单独展示，用户自行判断能否满足
+      // shipDate: 建议最晚发货时间 = 预计断货日 - 头程天数
+      get shipQty() {
+        if (this.isClearance) return 0;
+        const logDays = window.FBA_LOGISTICS_DAYS || 35;
+        const safeDays = row.safety_days ?? 14;
+        const daily = row.future_daily ?? 0;
+        const targetFBA = (logDays + safeDays) * daily;
+        const currentFBA = fbaAvail + fbaInTransit;
+        return Math.max(0, Math.ceil(targetFBA - currentFBA));
+      },
+      get shipDate() {
+        const qty = this.shipQty;
+        if (!qty || !this.stockoutDate) return null;
+        const logDays = window.FBA_LOGISTICS_DAYS || 35;
+        return new Date(this.stockoutDate.getTime() - logDays * 86400000);
+      },
 
       // 新增运营字段 — 真实来自后端 (rl_fba_shipment_item / mk_purchase_draft / mk_sku_inbound_detail)
       lastShipmentAt: toDate(row.last_shipment_date),  // 上次发货时间

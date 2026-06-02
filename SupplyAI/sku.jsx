@@ -159,6 +159,14 @@ function SKUTrendChart({
   const [tip, setTip] = React.useState(null);
   const [editor, setEditor] = React.useState(null);
   const [editValue, setEditValue] = React.useState('');
+
+  React.useEffect(() => {
+    if (!editor) return;
+    const close = () => setEditor(null);
+    window.addEventListener('scroll', close, true);
+    return () => window.removeEventListener('scroll', close, true);
+  }, [!!editor]);
+
   const histDays = range.histDays;
   const futDays = range.futDays;
   const isHistoryOnly = futDays === 0;
@@ -1267,6 +1275,14 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
   const [editor, setEditor] = React.useState(null);
   const [edVal, setEdVal] = React.useState('');
   const edRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!editor) return;
+    const close = () => setEditor(null);
+    window.addEventListener('scroll', close, true);
+    return () => window.removeEventListener('scroll', close, true);
+  }, [!!editor]);
+
   const { histDays, futDays } = range;
   const isLastYear = range.id === 'lastYear';
   const fullHist = React.useMemo(() => {
@@ -1275,14 +1291,20 @@ function TrendChartV7({ sku, range, holidays, onHolidayChange, invOverrides, onI
     return extendHistoryV7(raw, histDays, sku.id.charCodeAt(0));
   }, [sku.id, histDays]);
   const forecast = React.useMemo(
-    () => buildStockConstrainedForecastV7(sku.futureDaily, futDays, holidays, sku.totalStock, invOverrides, sku.forecastSeries),
-    [sku.futureDaily, sku.totalStock, futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(sku.forecastSeries || [])]
+    () => buildStockConstrainedForecastV7(sku.futureDaily, futDays, holidays, sku.totalStock, invOverrides, sku.forecastSeries, inboundByDay),
+    [sku.futureDaily, sku.totalStock, futDays, JSON.stringify(holidays), JSON.stringify(invOverrides), JSON.stringify(sku.forecastSeries || []), JSON.stringify(inboundByDay)]
   );
   const futVals = forecast.map(f => f.value);
-  const invSeries = React.useMemo(
-    () => buildInventoryV7(sku.totalStock, futVals, invOverrides, inboundByDay),
-    [sku.totalStock, JSON.stringify(futVals), JSON.stringify(invOverrides), JSON.stringify(inboundByDay)]
-  );
+  const invSeries = React.useMemo(() => {
+    let inv = sku.totalStock;
+    return forecast.map((f, i) => {
+      const absDay = i + 1;
+      if (invOverrides[absDay] !== undefined) inv = Math.max(0, Number(invOverrides[absDay]) || 0);
+      if (inboundByDay[absDay]) inv += inboundByDay[absDay];
+      inv = Math.max(0, inv - (f.demand ?? f.value));
+      return inv;
+    });
+  }, [sku.totalStock, JSON.stringify(forecast.map(f => f.demand ?? f.value)), JSON.stringify(invOverrides), JSON.stringify(inboundByDay)]);
   const W = 960;
   const H = 310;
   const PAD = { t: 32, b: 36, l: 50, r: 20, ra: 58 };
@@ -1753,6 +1775,8 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
   const baseSku = SKUS.find(s => s.id === skuId) || SKUS[0];
   const [enriched, setEnriched] = React.useState(null);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
+  // split 模式下 AI panel 的本地 history（drawer 模式由 app.jsx 管理）
+  const [splitAiHistory, setSplitAiHistory] = React.useState([]);
 
   // 详情页挂载后拉 /skus/detail + /skus/trends 把历史/预测序列合并进 sku
   React.useEffect(() => {
@@ -1809,6 +1833,50 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
                 <h1 className="h1" style={{ margin: 0 }}>{sku.name}</h1>
                 <PriorityBadge level={sku.priority} size="md"/>
                 <span className="chip">{sku.status}</span>
+                {(sku.tags || []).map(tag => {
+                  const isClear = tag === '清货';
+                  const HOL_SET = new Set([
+                    'Prime Day','Black Friday','Cyber Monday','Christmas','Thanksgiving',
+                    "Halloween","New Year","Valentine's Day","Mother's Day","Father's Day",
+                    'Easter','Memorial Day','Labor Day','Back to School','Super Bowl',
+                    '4th of July','Independence Day',
+                    '黑五','圣诞节','感恩节','万圣节','双十一','双12','新年','春节',
+                    '母亲节','父亲节','情人节','复活节','劳工节','独立日','开学季',
+                    '超级碗','网络星期一','大促','亚马逊大促','Prime会员日','年中大促',
+                  ]);
+                  const isHol = HOL_SET.has(tag);
+                  return (
+                    <span key={tag} className="chip" style={{
+                      height: 20, fontSize: 11,
+                      background: isClear ? 'rgba(248,113,113,.15)' : isHol ? 'rgba(245,158,11,.15)' : undefined,
+                      color: isClear ? 'var(--p1)' : isHol ? 'var(--p2-strong)' : undefined,
+                      borderColor: isClear ? 'rgba(248,113,113,.35)' : isHol ? 'rgba(245,158,11,.35)' : undefined,
+                    }}>{tag}</span>
+                  );
+                })}
+                {(() => {
+                  const hols = getHolidays();
+                  const sellDays = +(sku.fbaSellable || sku.sellable || 0);
+                  const alerts = hols
+                    .filter(h => h.fromAbs > 0 && h.fromAbs <= 120)
+                    .filter(h => sellDays < h.toAbs + 14)
+                    .sort((a, b) => a.fromAbs - b.fromAbs)
+                    .slice(0, 3);
+                  return alerts.map(h => {
+                    const danger = sellDays < h.fromAbs;
+                    return (
+                      <span key={h.id} title={danger ? `库存将在 ${h.name} 前断货` : `${h.name} 期间库存偏紧`}
+                        className="chip" style={{
+                          height: 20, fontSize: 11, cursor: 'default',
+                          background: danger ? 'rgba(248,113,113,.15)' : 'rgba(245,158,11,.12)',
+                          color: danger ? 'var(--p1)' : 'var(--p2-strong)',
+                          borderColor: danger ? 'rgba(248,113,113,.35)' : 'rgba(245,158,11,.30)',
+                        }}>
+                        {h.flag} {h.name}{danger ? ' 前断货' : ' 库存偏紧'}
+                      </span>
+                    );
+                  });
+                })()}
               </div>
               <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--text-3)', marginTop: 6, flexWrap: 'wrap' }} className="mono">
                 <span>MSKU: <span style={{ color: 'var(--text-2)' }}>{sku.msku}</span></span>
@@ -1831,7 +1899,7 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
 
           {/* Risk conclusion banner */}
           <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0,
+            display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 0,
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 'var(--r-md)',
             boxShadow: 'var(--sh-inset-top)',
@@ -1843,7 +1911,31 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
               const r = fmt.rel(sku.purchaseDate);
               const isPast = r.endsWith('天前') || r === '昨天';
               return (isPast ? '' : r + ' · ') + '全链路口径';
-            })()} last/>
+            })()}/>
+            <DetailStat
+              label="建议发货量"
+              hint="本地仓 → FBA 头程建议数量；口径：(头程天数 + 安全天数) × 日销 − FBA 在库"
+              main={sku.isClearance ? '不发货' : ((sku.shipQty || 0) > 0 ? fmt.num(sku.shipQty) + ' 件' : '已充足')}
+              sub={sku.isClearance ? '清货中，不建议发货' : (() => {
+                const logDays = window.FBA_LOGISTICS_DAYS || 35;
+                const fbaTarget = Math.ceil((logDays + (sku.safeDays || 14)) * (sku.futureDaily || 0));
+                const currentFBA = (sku.fbaAvail || 0) + (sku.fbaInTransit || 0);
+                return `FBA 目标 ${fbaTarget} 件 · 当前 ${currentFBA} 件`;
+              })()}
+            />
+            <DetailStat
+              label="建议发货时间"
+              hint="建议最晚从本地仓发出的时间；断货日 − 头程天数"
+              main={(!sku.shipQty || !sku.shipDate)
+                ? (sku.isClearance ? '—' : '充足')
+                : (sku.shipDate < new Date() ? '尽快' : fmt.dateLong(sku.shipDate))}
+              sub={(!sku.shipQty || !sku.shipDate)
+                ? (sku.isClearance ? '' : 'FBA 库存满足头程需求')
+                : (sku.shipDate < new Date()
+                    ? '已逾期，需立即安排头程发货'
+                    : fmt.rel(sku.shipDate) + ' · 头程口径')}
+              last
+            />
           </div>
 
           {/* Key metrics row */}
@@ -1937,7 +2029,8 @@ function SKUDetail({ skuId, setRoute, openRules, openCreatePO, openAI, aiOpen, a
       {/* SKU AI panel — split mode shows it inline */}
       {aiOpen && aiMode === 'split' && (
         <div style={{ width: 420, flex: 'none', borderLeft: '1px solid var(--border)', background: 'var(--bg-sunken)' }}>
-          <SKUAIPanel sku={sku} onClose={() => openAI(false)} mode="split"/>
+          <SKUAIPanel sku={sku} onClose={() => openAI(false)} mode="split"
+            history={splitAiHistory} setHistory={setSplitAiHistory}/>
         </div>
       )}
     </div>
@@ -2006,9 +2099,25 @@ function RiskCellWithExplain({ sku }) {
           <CalcRow k="总库存" v={`${sku.totalStock} = FBA ${sku.fbaAvail + sku.fbaInTransit} + 本地 ${sku.localTotal}`}/>
           <CalcRow k="参与库存" v={`${sku.planningStock ?? sku.fbaAvail} = ${sku.stockScopeLabel || 'FBA 可用'}`}/>
           <CalcRow k="建议采购" v={`${sku.coverageDemand} − ${sku.planningStock ?? sku.fbaAvail} = ${fmt.num(sku.suggestQty)} 件`} highlight/>
-          <CalcRow k="风险判定" v={`可售天数 ${(+sku.sellable).toFixed(2)}d → ${sku.priority.toUpperCase()}（${sku.stockScopeLabel || '规则库存'}口径）`}/>
-          <CalcRow k="预计断货" v={`今天 + ${(+sku.sellable).toFixed(2)}d = ${fmt.dateLong(sku.stockoutDate)}`}/>
-          <CalcRow k="建议采购日" v={`断货 − ${sku.purchaseLeadTime}d = ${fmt.dateLong(sku.purchaseDate)}`} last/>
+          <CalcRow k="风险判定" v={`FBA 可售 ${(+sku.fbaSellable).toFixed(2)}d → ${sku.priority.toUpperCase()}（仅 FBA 侧）`}/>
+          <CalcRow k="预计断货" v={`今天 + ${(+sku.fbaSellable).toFixed(2)}d = ${fmt.dateLong(sku.stockoutDate)}`}/>
+          <CalcRow k="建议采购日" v={`断货 − ${sku.purchaseLeadTime}d = ${fmt.dateLong(sku.purchaseDate)}`}/>
+          {(() => {
+            const logDays = window.FBA_LOGISTICS_DAYS || 35;
+            const fbaTarget = Math.ceil((logDays + (sku.safeDays || 14)) * (sku.futureDaily || 0));
+            const currentFBA = (sku.fbaAvail || 0) + (sku.fbaInTransit || 0);
+            return (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', padding: '6px 0 2px', marginTop: 6, borderTop: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 10.5, color: 'var(--accent)', fontWeight: 600, letterSpacing: 0.2 }}>FBA 头程发货口径</span>
+                </div>
+                <CalcRow k="头程目标" v={`(${logDays}d 头程 + ${sku.safeDays}d 安全) × ${(+sku.futureDaily).toFixed(2)} = ${fbaTarget} 件`}/>
+                <CalcRow k="当前 FBA" v={`可用 ${sku.fbaAvail} + 在途 ${sku.fbaInTransit} = ${currentFBA} 件`}/>
+                <CalcRow k="建议发货" v={`${fbaTarget} − ${currentFBA} = ${sku.shipQty || 0} 件`} highlight/>
+                <CalcRow k="建议发货日" v={sku.shipDate ? `断货 ${fmt.dateLong(sku.stockoutDate)} − ${logDays}d = ${fmt.dateLong(sku.shipDate)}` : '—'} last/>
+              </>
+            );
+          })()}
         </div>
       )}
     </div>

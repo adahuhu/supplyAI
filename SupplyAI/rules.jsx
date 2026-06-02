@@ -273,6 +273,10 @@ function RulesModal({ open, onClose, ctx, showToast, refreshData }) {
           });
         }
       }
+      // 保存头程物流时效到全局,用于「建议发货时间」推算
+      if (logistics.length) {
+        window.FBA_LOGISTICS_DAYS = Math.max(...logistics.map(l => Number(l.days || 0)));
+      }
       setSaving(false);
       setComputing(true);
       let calcResp = null;
@@ -497,7 +501,7 @@ function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDura
         <div className="divider" style={{ margin: '14px 0' }}/>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <div className="label">物流方式</div>
+          <div className="label">头程物流方式（本地仓 → FBA）</div>
           <button className="btn sm" onClick={() => setLogistics([...logistics, { id: Date.now(), mode: 'sea_express', days: 18 }])}>
             <Icon name="plus" size={11}/>新增
           </button>
@@ -530,7 +534,7 @@ function ReplenishTab({ safeDays, setSafeDays, purchaseDuration, setPurchaseDura
           ))}
         </div>
         <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Icon name="info" size={11}/>同一规则下运输方式不可重复 · 计算时永远取最长物流时效
+          <Icon name="info" size={11}/>头程时效用于「建议发货时间」推算 · 同一规则下运输方式不可重复 · 计算时取最长时效
         </div>
 
         <div className="divider" style={{ margin: '14px 0' }}/>

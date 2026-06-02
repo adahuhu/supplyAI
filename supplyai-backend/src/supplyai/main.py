@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from supplyai import __version__
 from supplyai.api.v1 import api_v1_router
 from supplyai.config import settings
 from supplyai.utils.logging import configure_logging, get_logger
+
+# 前端静态文件目录（相对于 supplyai-backend/）
+_FRONTEND_DIR = Path(__file__).parent.parent.parent.parent / "SupplyAI"
 
 logger = get_logger(__name__)
 
@@ -53,12 +59,19 @@ app.add_middleware(
 # 注册 v1 路由
 app.include_router(api_v1_router, prefix="/api/supplyai")
 
+# 托管前端静态文件（/api/ 已先注册，不会被覆盖）
+if _FRONTEND_DIR.is_dir():
+    @app.get("/", include_in_schema=False)
+    async def root_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/SupplyAI.html")
 
-@app.get("/", tags=["root"])
-async def root() -> dict[str, str]:
-    return {
-        "name": "SupplyAI Backend",
-        "version": __version__,
-        "env": settings.app_env,
-        "docs": "/docs",
-    }
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="frontend")
+else:
+    @app.get("/", tags=["root"])
+    async def root() -> dict[str, str]:
+        return {
+            "name": "SupplyAI Backend",
+            "version": __version__,
+            "env": settings.app_env,
+            "docs": "/docs",
+        }

@@ -55,6 +55,8 @@ const LIST_SORT_ACCESSORS = {
   suggest: s => s.suggest ? 1 : 0,
   suggestQty: s => s.suggest ? (s.suggestQty ?? 0) : 0,
   purchaseDate: s => s.purchaseDate ? s.purchaseDate.getTime() : null,
+  shipQty: s => s.shipQty ?? 0,
+  shipDate: s => s.shipDate ? s.shipDate.getTime() : null,
   lastUpdated: s => s.lastUpdated ? s.lastUpdated.getTime() : null,
 };
 
@@ -95,8 +97,10 @@ function listSortLabel(sort) {
 }
 
 function isStockout7Sku(s) {
+  // 必须 FBA 当前无可用库存，否则不算断货
+  if (+(s?.fbaAvail ?? 0) > 0) return false;
   if (s && Array.isArray(s.fbaAvailable7) && s.fbaAvailable7.length >= 7) {
-    return s.fbaAvailable7.slice(-7).every(v => Number(v || 0) <= 0);
+    return s.fbaAvailable7.slice(-7).some(v => Number(v || 0) <= 0);
   }
   return !!s?.stockoutRecent7;
 }
@@ -241,6 +245,7 @@ function FilterBar({ filter, setFilter, counts }) {
   { v: 'p3', label: 'P3 关注', count: counts?.p3 ?? 0, color: 'p3' },
   { v: 'safe', label: '安全', count: counts?.safe ?? 0, color: 'safe' },
   { v: 'suggest', label: '建议采购', count: counts?.suggest ?? 0 },
+  { v: 'shipSuggest', label: '建议发货', count: counts?.shipSuggest ?? 0 },
   { v: 'stockout7', label: '7 天内断货', count: counts?.stockout7 ?? 0 }];
 
   return (
@@ -321,6 +326,7 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
       if (filter === 'p3') rows = rows.filter((s) => s.priority === 'p3');else
       if (filter === 'safe') rows = rows.filter((s) => s.priority === 'safe');else
       if (filter === 'suggest') rows = rows.filter((s) => s.suggest);else
+      if (filter === 'shipSuggest') rows = rows.filter((s) => s.shipQty > 0 && !s.isClearance);else
       if (filter === 'stockout7') rows = rows.filter(isStockout7Sku);
     }
 
@@ -362,7 +368,8 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
       p2: countRows(rows, s => s.priority === 'p2'),
       p3: countRows(rows, s => s.priority === 'p3'),
       safe: countRows(rows, s => s.priority === 'safe'),
-      suggest: countRows(rows, s => s.suggest),
+      suggest: countRows(rows, s => !s.isClearance && s.suggest),
+      shipSuggest: countRows(rows, s => s.shipQty > 0 && !s.isClearance),
       stockout7: countRows(rows, isStockout7Sku),
     };
   }, [applyFilters]);
@@ -491,7 +498,8 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
     totalStock: sumBy(filtered, s => s.totalStock),
     sellableAvg: avgBy(filtered, s => s.sellable),
     purchaseLeadTimeAvg: avgBy(filtered, s => s.purchaseLeadTime),
-    suggestQty: sumBy(filtered, s => s.suggest ? s.suggestQty : 0),
+    suggestQty: sumBy(filtered, s => (!s.isClearance && s.suggest) ? s.suggestQty : 0),
+    shipQty: sumBy(filtered, s => s.shipQty ?? 0),
   }), [filtered]);
 
   const clearAdvFilters = React.useCallback(() => {
@@ -704,6 +712,8 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 	              <SortTh id="suggest">建议采购</SortTh>
 	              <SortTh id="suggestQty" className="num">建议采购量</SortTh>
 	              <SortTh id="purchaseDate">建议采购时间</SortTh>
+	              <SortTh id="shipQty" className="num">建议发货量</SortTh>
+	              <SortTh id="shipDate">建议发货时间</SortTh>
 	              <SortTh id="lastUpdated">最后更新</SortTh>
               <th style={{ position: 'sticky', right: 0, background: 'var(--surface)', zIndex: 3, width: 80 }}>操作</th>
             </tr>
@@ -741,9 +751,28 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', minWidth: 120, maxWidth: 180 }}>
-                      {(s.tags && s.tags.length) ? s.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className="chip" style={{ height: 20, fontSize: 10.5, maxWidth: 86, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tag}</span>
-                      )) : <span style={{ color: 'var(--text-4)' }}>—</span>}
+                      {(s.tags && s.tags.length) ? s.tags.slice(0, 5).map(tag => {
+                        const isClear = tag === '清货';
+                        const HOLIDAY_SET = new Set([
+                          'Prime Day', 'Black Friday', 'Cyber Monday', 'Christmas', 'Thanksgiving',
+                          'Halloween', "New Year", "Valentine's Day", "Mother's Day", "Father's Day",
+                          'Easter', 'Memorial Day', 'Labor Day', 'Back to School', 'Super Bowl',
+                          '4th of July', 'Independence Day',
+                          '黑五', '圣诞节', '感恩节', '万圣节', '双十一', '双12', '新年', '春节',
+                          '母亲节', '父亲节', '情人节', '复活节', '劳工节', '独立日', '开学季',
+                          '超级碗', '网络星期一', '大促', '亚马逊大促', 'Prime会员日', '年中大促',
+                        ]);
+                        const isHol = HOLIDAY_SET.has(tag);
+                        return (
+                          <span key={tag} className="chip" style={{
+                            height: 20, fontSize: 10.5,
+                            maxWidth: 86, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            background: isClear ? 'rgba(248,113,113,.15)' : isHol ? 'rgba(245,158,11,.15)' : undefined,
+                            color: isClear ? 'var(--p1)' : isHol ? 'var(--p2-strong)' : undefined,
+                            borderColor: isClear ? 'rgba(248,113,113,.35)' : isHol ? 'rgba(245,158,11,.35)' : undefined,
+                          }}>{tag}</span>
+                        );
+                      }) : <span style={{ color: 'var(--text-4)' }}>—</span>}
                     </div>
                   </td>
                   <td>
@@ -793,10 +822,32 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
                   </td>
                   <td className="num tabular muted">{s.purchaseLeadTime}d</td>
                   <td>
-                    {s.suggest ? <span className="chip p1" style={{ height: 20, fontSize: 10.5 }}>建议</span> : <span className="chip safe" style={{ height: 20, fontSize: 10.5 }}>无需</span>}
+                    {s.isClearance
+                      ? <span className="chip" style={{ height: 20, fontSize: 10.5, background: 'rgba(248,113,113,.15)', color: 'var(--p1)', borderColor: 'rgba(248,113,113,.35)' }}>清货中</span>
+                      : s.suggest
+                        ? <span className="chip p1" style={{ height: 20, fontSize: 10.5 }}>建议</span>
+                        : <span className="chip safe" style={{ height: 20, fontSize: 10.5 }}>无需</span>}
                   </td>
-                  <td className="num tabular" style={{ fontWeight: 500 }}>{s.suggest ? fmt.num(s.suggestQty) : '—'}</td>
-                  <td className="tabular muted">{s.suggest ? fmt.dateLong(s.purchaseDate) : '—'}</td>
+                  <td className="num tabular" style={{ fontWeight: 500 }}>
+                    {s.isClearance ? <span style={{ color: 'var(--text-4)', fontSize: 11 }}>不备货</span> : (s.suggest ? fmt.num(s.suggestQty) : '—')}
+                  </td>
+                  <td className="tabular muted">{(!s.isClearance && s.suggest) ? fmt.dateLong(s.purchaseDate) : '—'}</td>
+                  <td className="num tabular" style={{ fontWeight: 500 }}>
+                    {s.isClearance
+                      ? <span style={{ color: 'var(--text-4)', fontSize: 11 }}>不发货</span>
+                      : (s.shipQty > 0 ? fmt.num(s.shipQty) : '—')}
+                  </td>
+                  <td className="tabular muted">
+                    {(!s.isClearance && s.shipQty > 0 && s.shipDate)
+                      ? (() => {
+                          const now = new Date();
+                          const isPast = s.shipDate < now;
+                          return <span style={isPast ? { color: 'var(--p1)', fontWeight: 500 } : {}}>
+                            {isPast ? '尽快' : fmt.dateLong(s.shipDate)}
+                          </span>;
+                        })()
+                      : '—'}
+                  </td>
                   <td className="tabular muted" style={{ fontSize: 11 }}>{fmt.time(s.lastUpdated)}</td>
                   <td style={{ position: 'sticky', right: 0, background: sel ? LIST_SELECTED_BG : 'var(--surface)', zIndex: 1 }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', gap: 2 }}>
@@ -836,6 +887,8 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
 	              <td className="num tabular">{totals.purchaseLeadTimeAvg == null ? '—' : '均 ' + totals.purchaseLeadTimeAvg.toFixed(0) + 'd'}</td>
 	              <td />
 	              <td className="num tabular">{fmt.num(totals.suggestQty)}</td>
+	              <td />
+	              <td className="num tabular">{fmt.num(totals.shipQty)}</td>
 	              <td />
 	              <td />
 	              <td style={{ position: 'sticky', right: 0, background: 'var(--surface)', zIndex: 2 }} />
@@ -878,7 +931,8 @@ function ListPage({ initialFilter = 'all', initialKeyword = '', initialMallId = 
           '商品', 'SKU', '店铺/国家', '状态', '标签', '风险', '近 7 天销量', '预测日销',
           '收入', '支出', '成本', '毛利润', '毛利率',
           'FBA 可用', 'FBA 在途', '本地实际', '本地预计', '本地库存', '总库存',
-          '可售天数', '预计断货', '采购时效', '建议采购', '建议采购量', '建议采购时间', '最后更新'].
+          '可售天数', '预计断货', '采购时效', '建议采购', '建议采购量', '建议采购时间',
+          '建议发货量', '建议发货时间', '最后更新'].
           map((c, i) =>
           <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', fontSize: 12.5 }}>
               <input type="checkbox" defaultChecked={i < 18 || i > 19 ? true : true} />
@@ -1031,14 +1085,24 @@ function recalcSkuForecastList(sku, nextDaily) {
   sku.sellable = daily > 0 ? +(planningStock / daily).toFixed(2) : 0;
   sku.fbaSellable = sku.sellable;
   sku.localSellable = daily > 0 ? +((sku.localTotal || 0) / daily).toFixed(2) : 0;
-  sku.suggestQty = Math.max(0, Math.ceil(sku.coverageDemand - planningStock));
-  sku.suggest = sku.suggestQty > 0;
+  sku.suggestQty = sku.isClearance ? 0 : Math.max(0, Math.ceil(sku.coverageDemand - planningStock));
+  sku.suggest = !sku.isClearance && sku.suggestQty > 0;
   const asOf = DASH_STATS.asOf || new Date();
   sku.stockoutDate = daily > 0 ? dateAddList(asOf, sku.sellable) : null;
   sku.purchaseDate = sku.stockoutDate ? dateAddList(sku.stockoutDate, -(sku.purchaseLeadTime || 0)) : null;
-  sku.priority = sku.sellable <= 7 ? 'p1'
-    : sku.sellable <= 15 ? 'p2'
-    : sku.sellable <= 30 ? 'p3'
+  // FBA 发货建议：目标 FBA 库存 = (头程天数 + 安全天数) × 日销
+  const logDays = window.FBA_LOGISTICS_DAYS || 35;
+  if (!sku.isClearance) {
+    const targetFBA = (logDays + (sku.safeDays || 14)) * daily;
+    const currentFBA = sku.fbaAvail + sku.fbaInTransit;
+    sku.shipQty = Math.max(0, Math.ceil(targetFBA - currentFBA));
+  } else {
+    sku.shipQty = 0;
+  }
+  sku.shipDate = (sku.shipQty > 0 && sku.stockoutDate) ? new Date(sku.stockoutDate.getTime() - logDays * 86400000) : null;
+  sku.priority = sku.fbaSellable <= 7 ? 'p1'
+    : sku.fbaSellable <= 15 ? 'p2'
+    : sku.fbaSellable <= 30 ? 'p3'
     : 'safe';
   sku.lastUpdated = new Date();
 }
@@ -1392,10 +1456,10 @@ function RiskCellWithTip({ level }) {
         }}>
           <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4, fontWeight: 500 }}>风险等级（按可售天数）</div>
           {[
-            ['p1', 'P1 紧急', '7 天内断货'],
-            ['p2', 'P2 重要', '15 天内断货'],
-            ['p3', 'P3 关注', '30 天内断货'],
-            ['safe', '安全', '30 天以上断货'],
+            ['p1', 'P1 紧急', 'FBA 可售 ≤ 7 天'],
+            ['p2', 'P2 重要', 'FBA 可售 8-15 天'],
+            ['p3', 'P3 关注', 'FBA 可售 16-30 天'],
+            ['safe', '安全', 'FBA 可售 > 30 天'],
           ].map(([k, label, desc]) => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
               <span className={'dot ' + k} style={{ flex: 'none' }} />
